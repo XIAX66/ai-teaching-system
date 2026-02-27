@@ -1,0 +1,24 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Backend
+backend/main
+backend/server.log
+backend/server_test.log
+backend/*.db
+backend/venv/
+backend/uploads/textbooks/*
+backend/uploads/resources/*
+!backend/uploads/textbooks/.gitkeep
+!backend/uploads/resources/.gitkeep
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/webpack.log
+frontend/*.log
+
+# Docker
+.docker-data/
+*.log
