@@ -50,6 +50,8 @@ services:
     environment:
       - MYSQL_DSN=user:password@tcp(mysql:3306)/ai_teaching_db?charset=utf8mb4&parseTime=True&loc=Local
       - MONGO_URI=mongodb://root:root_password@mongo:27017
+      - DOUBAO_API_KEY=b7d8b1e7-f83a-4250-ab18-932678d3277a
+      - QDRANT_URL=http://qdrant:6333
     ports:
       - "8080:8080"
     volumes:

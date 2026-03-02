@@ -1,6 +1,7 @@
 package service
 
 import (
+	"ai-teaching-system/internal/ai/service"
 	"ai-teaching-system/internal/global"
 	"ai-teaching-system/internal/model"
 	"ai-teaching-system/internal/model/mongo"
@@ -13,12 +14,15 @@ import (
 )
 
 type TextbookService struct {
-	repo *repository.TextbookRepository
+	repo          *repository.TextbookRepository
+	vectorService *service.VectorService
 }
 
 func NewTextbookService() *TextbookService {
+	vs, _ := service.NewVectorService()
 	return &TextbookService{
-		repo: repository.NewTextbookRepository(),
+		repo:          repository.NewTextbookRepository(),
+		vectorService: vs,
 	}
 }
 
@@ -87,6 +91,7 @@ func (s *TextbookService) ParseAndStoreTextbook(textbookID uint, filePath string
 
 	contentStr := string(output)
 
+	// 1. Store in MongoDB for structural view
 	textbookContent := mongo.TextbookContent{
 		TextbookID: textbookID,
 		Chapters: []mongo.Chapter{
@@ -118,8 +123,16 @@ func (s *TextbookService) ParseAndStoreTextbook(textbookID uint, filePath string
 		return
 	}
 
+	// 2. Index in Qdrant for AI Q&A (RAG)
+	if s.vectorService != nil {
+		log.Printf("Starting vector indexing for Textbook ID %d", textbookID)
+		if err := s.vectorService.IndexTextbook(textbookID, contentStr); err != nil {
+			log.Printf("Failed to index textbook in Qdrant: %v", err)
+		}
+	}
+
 	s.updateStatus(textbookID, "processed")
-	log.Printf("Finished Python-based PDF parsing for Textbook ID %d", textbookID)
+	log.Printf("Finished all processing for Textbook ID %d", textbookID)
 }
 
 func (s *TextbookService) updateStatus(textbookID uint, status string) {
@@ -130,12 +143,12 @@ func (s *TextbookService) GetTextbooksByTeacher(teacherID uint) ([]model.Textboo
 	return s.repo.ListTextbooksByTeacherID(teacherID)
 }
 
-func (s *TextbookService) SearchTextbooks(query string) ([]model.Textbook, error) {
-	return s.repo.SearchTextbooks(query)
-}
-
 func (s *TextbookService) GetAllTextbooks() ([]model.Textbook, error) {
 	return s.repo.GetAllTextbooks()
+}
+
+func (s *TextbookService) SearchTextbooks(query string) ([]model.Textbook, error) {
+	return s.repo.SearchTextbooks(query)
 }
 
 func (s *TextbookService) GetTextbookContent(textbookID string) (*TextbookDetail, error) {
