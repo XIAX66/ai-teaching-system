@@ -27,16 +27,13 @@ func NewAgentService() (*AgentService, error) {
 	}, nil
 }
 
-func (s *AgentService) Ask(textbookID uint, question string, imageBase64 string) (string, error) {
+func (s *AgentService) buildPrompt(textbookID uint, question string, imageBase64 string) (string, error) {
 	var contextStr string
 	
 	// 1. Try RAG retrieval
-	log.Printf("Attempting RAG retrieval for Textbook %d", textbookID)
 	contexts, err := s.vectorService.Search(textbookID, question, imageBase64, 3)
 	
 	if err != nil || len(contexts) == 0 {
-		log.Printf("RAG retrieval failed or empty (%v). Falling back to direct MongoDB content.", err)
-		// Fallback: Get first few sections from MongoDB
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		
@@ -46,29 +43,34 @@ func (s *AgentService) Ask(textbookID uint, question string, imageBase64 string)
 		errMongo := collection.FindOne(ctx, filter).Decode(&result)
 		
 		if errMongo == nil && len(result.Chapters) > 0 {
-			// Take first chapter's first section as context
 			contextStr = result.Chapters[0].Sections[0].Content
 			if len(contextStr) > 3000 {
-				contextStr = contextStr[:3000] // Cap to avoid prompt overflow
+				contextStr = contextStr[:3000]
 			}
 		}
 	} else {
 		contextStr = strings.Join(contexts, "\n---\n")
 	}
 
-	// 2. Build Prompt
-	prompt := fmt.Sprintf(`你是一名专业的教学助手。请根据提供的教材背景内容回答学生的问题。
+	return fmt.Sprintf(`你是一名专业的教学助手。请根据提供的教材背景内容回答学生的问题。
 如果问题涉及视频截图，请结合画面内容与教材知识点进行深入分析。
 要求：
 1. 回答必须专业、准确，符合教材语境。
-2. 请使用 Markdown 格式。
+2. 必须使用详细的 Markdown 格式（支持列表、表格、加粗、二级标题）。
 
 教材背景：
 %s
 
 学生提问：
-%s`, contextStr, question)
+%s`, contextStr, question), nil
+}
 
-	// 3. Call Doubao LLM
+func (s *AgentService) Ask(textbookID uint, question string, imageBase64 string) (string, error) {
+	prompt, _ := s.buildPrompt(textbookID, question, imageBase64)
 	return s.doubao.Chat(prompt, imageBase64)
+}
+
+func (s *AgentService) AskStream(textbookID uint, question string, imageBase64 string, onChunk func(string)) error {
+	prompt, _ := s.buildPrompt(textbookID, question, imageBase64)
+	return s.doubao.ChatStream(prompt, imageBase64, onChunk)
 }

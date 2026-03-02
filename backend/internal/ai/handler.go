@@ -2,6 +2,7 @@ package ai
 
 import (
 	"ai-teaching-system/internal/ai/service"
+	"io"
 	"log"
 	"net/http"
 
@@ -39,12 +40,24 @@ func (h *AIHandler) Ask(c *gin.Context) {
 		return
 	}
 
-	answer, err := h.agentService.Ask(req.TextbookID, req.Question, req.ImageBase64)
-	if err != nil {
-		log.Printf("AI Ask Error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
+	// 开启 SSE 流式响应
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
 
-	c.JSON(http.StatusOK, gin.H{"answer": answer})
+	err := h.agentService.AskStream(req.TextbookID, req.Question, req.ImageBase64, func(chunk string) {
+		// 写入 SSE 格式: data: <content>\n\n
+		c.SSEvent("message", chunk)
+		c.Writer.Flush()
+	})
+
+	if err != nil {
+		log.Printf("AI Stream Error: %v", err)
+		// 如果在流开始前报错，可以返回错误
+		// 但如果流已经开始，SSE 错误处理通常由客户端断开决定
+		c.SSEvent("error", err.Error())
+	} else {
+		c.SSEvent("done", "[DONE]")
+	}
 }

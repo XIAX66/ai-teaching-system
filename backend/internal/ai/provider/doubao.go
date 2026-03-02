@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -29,7 +31,7 @@ func NewDoubaoProvider() *DoubaoProvider {
 		ModelID: "doubao-seed-2-0-pro-260215",
 		BaseURL: "https://ark.cn-beijing.volces.com/api/v3/responses",
 		Client: &http.Client{
-			Timeout: 180 * time.Second,
+			// 对流式输出，我们不设置总超时，由 context 控制
 		},
 	}
 }
@@ -42,16 +44,26 @@ type DoubaoMessage struct {
 type DoubaoContent struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
-	// 关键修复：在 v3/responses API 中，image_url 直接是字符串类型
-	ImageURL string `json:"image_url,omitempty"` 
+	ImageURL string `json:"image_url,omitempty"`
 }
 
 type DoubaoRequest struct {
-	Model string          `json:"model"`
-	Input []DoubaoMessage `json:"input"`
+	Model  string          `json:"model"`
+	Input  []DoubaoMessage `json:"input"`
+	Stream bool            `json:"stream,omitempty"`
 }
 
-type DoubaoResponseV3 struct {
+// 流式响应的结构
+type DoubaoStreamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content string `json:"content"`
+		} `json:"delta"`
+	} `json:"choices"`
+}
+
+// 兼容 Ark V3 模式的流输出结构
+type DoubaoV3Chunk struct {
 	Output []struct {
 		Type    string `json:"type"`
 		Content []struct {
@@ -61,26 +73,76 @@ type DoubaoResponseV3 struct {
 	} `json:"output"`
 }
 
-func (p *DoubaoProvider) Chat(text string, imageBase64 string) (string, error) {
+func (p *DoubaoProvider) ChatStream(text string, imageBase64 string, onChunk func(string)) error {
 	var contents []DoubaoContent
-	
 	if imageBase64 != "" {
-		contents = append(contents, DoubaoContent{
-			Type:     "input_image",
-			ImageURL: imageBase64, // 直接传递 base64 字符串
-		})
+		contents = append(contents, DoubaoContent{Type: "input_image", ImageURL: imageBase64})
 	}
-	
-	contents = append(contents, DoubaoContent{
-		Type: "input_text",
-		Text: text,
-	})
+	contents = append(contents, DoubaoContent{Type: "input_text", Text: text})
 
 	reqBody := DoubaoRequest{
-		Model: p.ModelID,
-		Input: []DoubaoMessage{{Role: "user", Content: contents}},
+		Model:  p.ModelID,
+		Input:  []DoubaoMessage{{Role: "user", Content: contents}},
+		Stream: true,
 	}
 	
+	jsonData, _ := json.Marshal(reqBody)
+	req, err := http.NewRequest("POST", p.BaseURL, bytes.NewBuffer(jsonData))
+	if err != nil { return err }
+	
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+p.APIKey)
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := p.Client.Do(req)
+	if err != nil { return err }
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("doubao api error: %s", string(body))
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF { break }
+			return err
+		}
+
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "data:") { continue }
+		
+		data := strings.TrimPrefix(line, "data:")
+		if data == "[DONE]" { break }
+
+		var chunk DoubaoV3Chunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			log.Printf("Parse chunk error: %v", err)
+			continue
+		}
+
+		for _, out := range chunk.Output {
+			for _, content := range out.Content {
+				if content.Text != "" {
+					onChunk(content.Text)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// 保留原有的 Chat 方法供非流式调用
+func (p *DoubaoProvider) Chat(text string, imageBase64 string) (string, error) {
+	var contents []DoubaoContent
+	if imageBase64 != "" {
+		contents = append(contents, DoubaoContent{Type: "input_image", ImageURL: imageBase64})
+	}
+	contents = append(contents, DoubaoContent{Type: "input_text", Text: text})
+
+	reqBody := DoubaoRequest{Model: p.ModelID, Input: []DoubaoMessage{{Role: "user", Content: contents}}}
 	jsonData, _ := json.Marshal(reqBody)
 	
 	req, err := http.NewRequest("POST", p.BaseURL, bytes.NewBuffer(jsonData))
@@ -89,32 +151,27 @@ func (p *DoubaoProvider) Chat(text string, imageBase64 string) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.APIKey)
 
-	log.Printf("[AI] Sending multimodal request (string format), size: %d", len(jsonData))
-	resp, err := p.Client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil { return "", err }
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	var v3Resp DoubaoResponseV3
-	if err := json.Unmarshal(body, &v3Resp); err != nil {
-		return "", fmt.Errorf("ark v3 unmarshal error: %v, raw: %s", err, string(body))
+	// 解析逻辑同之前...
+	var v3Resp struct {
+		Output []struct {
+			Type    string `json:"type"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"output"`
 	}
-
-	// 检查输出
-	for _, out := range v3Resp.Output {
-		if out.Type == "message" {
-			for _, content := range out.Content {
-				if content.Text != "" {
-					return content.Text, nil
-				}
-			}
-		}
+	json.Unmarshal(body, &v3Resp)
+	if len(v3Resp.Output) > 0 && len(v3Resp.Output[0].Content) > 0 {
+		return v3Resp.Output[0].Content[0].Text, nil
 	}
-	
-	return "", fmt.Errorf("AI 响应异常。原始返回: %s", string(body))
+	return "", fmt.Errorf("no answer. raw: %s", string(body))
 }
 
-// GetEmbedding 保持不变，因为 Embedding API 的结构可能不同
 func (p *DoubaoProvider) GetEmbedding(text string, imageBase64 string) ([]float32, error) {
 	var inputs []DoubaoEmbeddingInput
 	if text != "" { inputs = append(inputs, DoubaoEmbeddingInput{Type: "text", Text: text}) }

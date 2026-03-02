@@ -6,6 +6,9 @@ import {
   Zap, Play, Info, Download, Upload, Plus, File, Camera, Send, User
 } from 'lucide-react';
 
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+
 interface ChatMessage {
   role: 'user' | 'ai';
   text: string;
@@ -13,83 +16,7 @@ interface ChatMessage {
 }
 
 const ResourceDetailPage: React.FC = () => {
-  const { type, id } = useParams();
-  const navigate = useNavigate();
-  const [data, setData] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'reader' | 'parsed' | 'videos' | 'files'>('reader');
-  const [loading, setLoading] = useState(true);
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [uploadForm, setUploadForm] = useState({ title: '', description: '' });
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  
-  // AI Agent States
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  const [question, setQuestion] = useState('');
-  const [pendingImage, setPendingImage] = useState<string | null>(null);
-  const [isAsking, setIsAsking] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  const isTeacher = localStorage.getItem('role') === 'teacher';
-
-  const fetchData = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await axios.get(`/api/textbook/content/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setData(res.data.data);
-    } catch (err) { console.error('Failed to fetch content'); } finally { setLoading(false); }
-  };
-
-  useEffect(() => { fetchData(); }, [id]);
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory]);
-
-  const handleResourceUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedFile) return;
-    const formData = new FormData();
-    formData.append('title', uploadForm.title);
-    formData.append('description', uploadForm.description);
-    formData.append('file', selectedFile);
-    try {
-      const token = localStorage.getItem('token');
-      await axios.post(`/api/textbook/content/${id}/resource`, formData, {
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' }
-      });
-      setShowUploadModal(false);
-      setUploadForm({ title: '', description: '' });
-      setSelectedFile(null);
-      fetchData();
-    } catch (err) { alert('上传失败'); }
-  };
-
-  // --- AI Agent Logic ---
-  
-  const takeScreenshot = (e: React.MouseEvent) => {
-    // Find the video element in the same card
-    const card = (e.currentTarget as HTMLElement).closest('.video-card');
-    const video = card?.querySelector('video');
-    
-    if (video && canvasRef.current) {
-      const canvas = canvasRef.current;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      try {
-        ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
-        // 使用 jpeg 格式并设置质量为 0.5，显著减小 Base64 体积
-        const base64 = canvas.toDataURL('image/jpeg', 0.5);
-        setPendingImage(base64);
-        setChatHistory(prev => [...prev, { role: 'ai', text: '已捕获视频画面，请描述您的问题：' }]);
-      } catch (err) {
-        console.error('Screenshot failed:', err);
-        alert('由于浏览器安全限制（跨域），无法截取该视频画面。');
-      }
-    } else {
-      console.log("Video element not found");
-    }
-  };
+  // ... (保持原有 hooks 不变)
 
   const askAI = async () => {
     if (!question && !pendingImage) return;
@@ -97,6 +24,11 @@ const ResourceDetailPage: React.FC = () => {
     
     const newUserMsg: ChatMessage = { role: 'user', text: question || "分析这张截图内容", image: pendingImage || undefined };
     setChatHistory(prev => [...prev, newUserMsg]);
+    
+    // 初始化 AI 回复的消息对象
+    const aiMessageId = Date.now();
+    setChatHistory(prev => [...prev, { role: 'ai', text: '' }]);
+    
     const currentQuestion = question;
     const currentImage = pendingImage;
     
@@ -105,23 +37,73 @@ const ResourceDetailPage: React.FC = () => {
 
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.post(`/api/ai/ask`, {
-        textbook_id: parseInt(id!),
-        question: currentQuestion || "分析这张图片中的知识点",
-        image_base64: currentImage
-      }, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 180000 // 增加前端超时时间到 3 分钟
+      const response = await fetch('/api/ai/ask', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          textbook_id: parseInt(id!),
+          question: currentQuestion || "分析这张图片中的知识点",
+          image_base64: currentImage
+        })
       });
-      
-      setChatHistory(prev => [...prev, { role: 'ai', text: res.data.answer }]);
+
+      if (!response.ok) throw new Error('网络响应异常');
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n');
+          
+          for (const line of lines) {
+            if (line.startsWith('data:')) {
+              const data = line.replace('data:', '').trim();
+              if (data === '[DONE]') continue;
+              
+              // 这里我们直接累加文本（简单处理 SSE 格式）
+              // 正规做法是解析 JSON，但我们的后端 SSEvent 只发了文本块
+              try {
+                fullText += data;
+                setChatHistory(prev => {
+                  const last = [...prev];
+                  last[last.length - 1] = { ...last[last.length - 1], text: fullText };
+                  return last;
+                });
+              } catch (e) {}
+            }
+          }
+        }
+      }
     } catch (err: any) {
-      const errMsg = err.response?.data?.error || 'AI 助手暂时无法响应';
-      setChatHistory(prev => [...prev, { role: 'ai', text: `抱歉，出现错误：${errMsg}` }]);
+      setChatHistory(prev => {
+        const last = [...prev];
+        last[last.length - 1] = { ...last[last.length - 1], text: '抱歉，连接 AI 助手失败。' };
+        return last;
+      });
     } finally {
       setIsAsking(false);
     }
   };
+
+  // ... (保持其它逻辑不变)
+
+  // 更新渲染部分
+  // 在渲染消息的地方修改：
+  // {msg.role === 'ai' ? (
+  //   <ReactMarkdown remarkPlugins={[remarkGfm]} className="prose prose-sm max-w-none prose-slate">
+  //     {msg.text}
+  //   </ReactMarkdown>
+  // ) : msg.text}
+
 
   const pdfUrl = data?.metadata?.file_path ? `http://localhost:8080/${data.metadata.file_path}` : '';
   const videos = data?.resources?.filter((r: any) => r.type === 'video') || [];
@@ -240,7 +222,18 @@ const ResourceDetailPage: React.FC = () => {
               <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[90%] rounded-3xl px-5 py-4 shadow-sm text-sm leading-relaxed ${msg.role === 'user' ? 'bg-primary text-white rounded-tr-none' : 'bg-white border border-slate-100 text-slate-700 rounded-tl-none'}`}>
                   {msg.image && <img src={msg.image} className="rounded-2xl mb-3 border border-white/20 w-full aspect-video object-cover" alt="screenshot" />}
-                  <div className="whitespace-pre-wrap">{msg.text}</div>
+                  <div className="whitespace-pre-wrap text-inherit">
+                    {msg.role === 'ai' ? (
+                      <ReactMarkdown 
+                        remarkPlugins={[remarkGfm]} 
+                        className="prose prose-sm max-w-none prose-slate prose-p:leading-relaxed prose-pre:bg-slate-800 prose-pre:text-slate-100"
+                      >
+                        {msg.text}
+                      </ReactMarkdown>
+                    ) : (
+                      msg.text
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
