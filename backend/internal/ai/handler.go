@@ -2,7 +2,6 @@ package ai
 
 import (
 	"ai-teaching-system/internal/ai/service"
-	"io"
 	"log"
 	"net/http"
 

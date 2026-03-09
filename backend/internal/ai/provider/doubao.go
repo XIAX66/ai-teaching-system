@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 )
 
 type DoubaoProvider struct {
@@ -30,9 +29,7 @@ func NewDoubaoProvider() *DoubaoProvider {
 		APIKey:  apiKey,
 		ModelID: "doubao-seed-2-0-pro-260215",
 		BaseURL: "https://ark.cn-beijing.volces.com/api/v3/responses",
-		Client: &http.Client{
-			// 对流式输出，我们不设置总超时，由 context 控制
-		},
+		Client:  &http.Client{},
 	}
 }
 
@@ -44,7 +41,7 @@ type DoubaoMessage struct {
 type DoubaoContent struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
-	ImageURL string `json:"image_url,omitempty"`
+	ImageURL string `json:"image_url,omitempty"` // 统一为 string 适配 ChatStream
 }
 
 type DoubaoRequest struct {
@@ -53,16 +50,6 @@ type DoubaoRequest struct {
 	Stream bool            `json:"stream,omitempty"`
 }
 
-// 流式响应的结构
-type DoubaoStreamChunk struct {
-	Choices []struct {
-		Delta struct {
-			Content string `json:"content"`
-		} `json:"delta"`
-	} `json:"choices"`
-}
-
-// 兼容 Ark V3 模式的流输出结构
 type DoubaoV3Chunk struct {
 	Output []struct {
 		Type    string `json:"type"`
@@ -134,7 +121,6 @@ func (p *DoubaoProvider) ChatStream(text string, imageBase64 string, onChunk fun
 	return nil
 }
 
-// 保留原有的 Chat 方法供非流式调用
 func (p *DoubaoProvider) Chat(text string, imageBase64 string) (string, error) {
 	var contents []DoubaoContent
 	if imageBase64 != "" {
@@ -151,15 +137,13 @@ func (p *DoubaoProvider) Chat(text string, imageBase64 string) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.APIKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.Client.Do(req)
 	if err != nil { return "", err }
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	// 解析逻辑同之前...
 	var v3Resp struct {
 		Output []struct {
-			Type    string `json:"type"`
 			Content []struct {
 				Text string `json:"text"`
 			} `json:"content"`

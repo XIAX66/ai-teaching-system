@@ -12,6 +12,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@tailwindcss/typography": "^0.5.19",
     "axios": "^1.13.4",
     "jwt-decode": "^4.0.0",
     "lucide-react": "^0.563.0",
