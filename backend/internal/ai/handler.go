@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -40,14 +41,32 @@ func (h *AIHandler) Ask(c *gin.Context) {
 		return
 	}
 
+	// 关键修复：使用正确的 context 键名 "userID"
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: User info missing"})
+		return
+	}
+	
+	// 在 JWT 中间件中 claims.UserID 通常直接是 uint 类型或通过类型断言确定
+	var userID uint
+	switch v := userIDVal.(type) {
+	case uint:
+		userID = v
+	case float64:
+		userID = uint(v)
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID type in context"})
+		return
+	}
+
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("Transfer-Encoding", "chunked")
-	c.Header("X-Accel-Buffering", "no") // 关键：禁止 Nginx 缓存
+	c.Header("X-Accel-Buffering", "no")
 
-	err := h.agentService.AskStream(req.TextbookID, req.Question, req.ImageBase64, func(chunk string) {
-		// 发送每个 chunk 后立即 Flush
+	err := h.agentService.AskStream(userID, req.TextbookID, req.Question, req.ImageBase64, func(chunk string) {
 		fmt.Fprintf(c.Writer, "data: %s\n\n", chunk)
 		c.Writer.Flush()
 	})
@@ -60,4 +79,32 @@ func (h *AIHandler) Ask(c *gin.Context) {
 		fmt.Fprintf(c.Writer, "data: [DONE]\n\n")
 		c.Writer.Flush()
 	}
+}
+
+func (h *AIHandler) GetHistory(c *gin.Context) {
+	textbookIDStr := c.Param("id")
+	tid, _ := strconv.ParseUint(textbookIDStr, 10, 32)
+
+	// 关键修复：使用正确的 context 键名 "userID"
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var userID uint
+	switch v := userIDVal.(type) {
+	case uint:
+		userID = v
+	case float64:
+		userID = uint(v)
+	}
+
+	history, err := h.agentService.GetChatHistory(userID, uint(tid))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": history})
 }

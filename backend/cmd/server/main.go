@@ -16,6 +16,7 @@ func main() {
 
 	// Initialize Router
 	r := gin.Default()
+	r.MaxMultipartMemory = 50 << 20 // 50 MiB
 
 	// Middleware
 	r.Use(middleware.CORS())
@@ -55,6 +56,7 @@ func main() {
 
 			// AI Routes
 			userGroup.POST("/ai/ask", aiHandler.Ask)
+			userGroup.GET("/ai/history/:id", aiHandler.GetHistory)
 
 			// Legacy Video Routes (Optional to keep for now)
 			userGroup.POST("/video/upload", videoHandler.Upload)

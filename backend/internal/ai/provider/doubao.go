@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -31,24 +32,21 @@ func NewDoubaoProvider() *DoubaoProvider {
 	}
 }
 
-func (p *DoubaoProvider) ChatStream(text string, imageBase64 string, onChunk func(string)) error {
-	var contents []DoubaoMessageContent
-	if imageBase64 != "" {
-		contents = append(contents, DoubaoMessageContent{Type: "input_image", ImageURL: imageBase64})
-	}
-	contents = append(contents, DoubaoMessageContent{Type: "input_text", Text: text})
-
+func (p *DoubaoProvider) ChatStream(history []DoubaoMessage, onChunk func(string)) error {
 	reqBody := struct {
 		Model  string          `json:"model"`
 		Input  []DoubaoMessage `json:"input"`
 		Stream bool            `json:"stream"`
 	}{
 		Model:  p.ModelID,
-		Input:  []DoubaoMessage{{Role: "user", Content: contents}},
+		Input:  history,
 		Stream: true,
 	}
 	
 	jsonData, _ := json.Marshal(reqBody)
+	// 调试日志：打印发送给豆包的完整内容
+	// fmt.Printf("DEBUG REQ: %s\n", string(jsonData))
+
 	req, err := http.NewRequest("POST", p.BaseURL, bytes.NewBuffer(jsonData))
 	if err != nil { return err }
 	
@@ -60,6 +58,11 @@ func (p *DoubaoProvider) ChatStream(text string, imageBase64 string, onChunk fun
 	if err != nil { return err }
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("ark api error (status %d): %s", resp.StatusCode, string(body))
+	}
+
 	reader := bufio.NewReader(resp.Body)
 	for {
 		line, err := reader.ReadString('\n')
@@ -68,42 +71,30 @@ func (p *DoubaoProvider) ChatStream(text string, imageBase64 string, onChunk fun
 			return err
 		}
 
-		// SSE 协议处理
+		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "data:") { continue }
-		dataPart := strings.TrimPrefix(line, "data:")
-		dataPart = strings.TrimSpace(dataPart)
-		
-		if dataPart == "[DONE]" || dataPart == "DONE" { break }
+		data := strings.TrimPrefix(line, "data:")
+		trimmed := strings.TrimSpace(data)
+		if trimmed == "[DONE]" || trimmed == "DONE" { break }
 
 		var chunk struct {
 			Type  string `json:"type"`
 			Delta string `json:"delta"`
 		}
-
-		if err := json.Unmarshal([]byte(dataPart), &chunk); err != nil {
-			continue
-		}
-
-		// 只有 delta 内容包才转发
-		if chunk.Type == "response.output_text.delta" {
-			// 发送原始 delta，不进行任何 trim
+		if err := json.Unmarshal([]byte(trimmed), &chunk); err == nil && chunk.Type == "response.output_text.delta" {
 			onChunk(chunk.Delta)
 		}
 	}
 	return nil
 }
 
-// 补全必要的结构体
 type DoubaoMessage struct {
-	Role    string                 `json:"role"`
-	Content []DoubaoMessageContent `json:"content"`
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"` // 这里改为 interface{} 以支持 string 或 []map
 }
-type DoubaoMessageContent struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	ImageURL string `json:"image_url,omitempty"`
-}
+
 func (p *DoubaoProvider) Chat(t string, i string) (string, error) { return "", nil }
-func (p *DoubaoProvider) GetEmbedding(t string, i string) ([]float32, error) { return nil, nil }
-type DoubaoEmbeddingRequest struct { Model string; Input []struct{ Type string; Text string; ImageURL *struct{ URL string } } }
-type DoubaoEmbeddingResponse struct { Data struct { Embedding []float32 } }
+func (p *DoubaoProvider) GetEmbedding(text string, imageBase64 string) ([]float32, error) {
+	// 保持原样...
+	return nil, nil
+}
