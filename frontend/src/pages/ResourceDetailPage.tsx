@@ -36,10 +36,23 @@ const ResourceDetailPage: React.FC = () => {
   const fetchData = async () => {
     try {
       const token = localStorage.getItem('token');
+      // 1. 获取教材内容
       const res = await axios.get(`/api/textbook/content/${id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setData(res.data.data);
+
+      // 2. 获取历史聊天记录
+      const historyRes = await axios.get(`/api/ai/history/${id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (historyRes.data.data) {
+        const formattedHistory: ChatMessage[] = historyRes.data.data.map((m: any) => ({
+          role: m.role === 'assistant' ? 'ai' : 'user',
+          text: m.content
+        }));
+        setChatHistory(formattedHistory);
+      }
     } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
@@ -99,7 +112,7 @@ const ResourceDetailPage: React.FC = () => {
       const response = await fetch('/api/ai/ask', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ textbook_id: parseInt(id!), question: currentQuestion || "总结教材内容", image_base_64: currentImage })
+        body: JSON.stringify({ textbook_id: parseInt(id!), question: currentQuestion || "总结教材内容", image_base64: currentImage })
       });
 
       if (!response.ok) throw new Error('AI 服务异常');
@@ -123,15 +136,10 @@ const ResourceDetailPage: React.FC = () => {
             if (line.startsWith('data:')) {
               let content = line.substring(5);
               if (content.trim() === '[DONE]') continue;
-
               if (content.startsWith(' ')) content = content.substring(1);
               
               fullText += content;
-
-              if (content.length === 0) {
-                fullText += "\n";
-              }
-
+              if (content.length === 0) fullText += "\n";
               updated = true;
             }
           }
@@ -240,7 +248,7 @@ const ResourceDetailPage: React.FC = () => {
                       <div className="markdown-body text-slate-800">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text || "正在思考..."}</ReactMarkdown>
                       </div>
-                    ) : <div className="text-white whitespace-pre-wrap">{msg.text}</div>}
+                    ) : <div className="whitespace-pre-wrap text-inherit">{msg.text}</div>}
                   </div>
                 </div>
               </div>
