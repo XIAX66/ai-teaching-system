@@ -6,7 +6,6 @@ import (
 	"ai-teaching-system/internal/model/mongo"
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 )

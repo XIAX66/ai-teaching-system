@@ -18,7 +18,62 @@
       'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
       sans-serif;
     -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    -moz-osx-smoothing: grayscale;
     background-color: #f8fafc;
   }
+}
+
+/* 强制覆盖 Markdown 视觉样式 */
+.markdown-body h1 {
+  font-size: 1.75rem !important;
+  font-weight: 900 !important;
+  margin-top: 1rem !important;
+  margin-bottom: 1rem !important;
+  display: block !important;
+  line-height: 1.2 !important;
+}
+
+.markdown-body h2 {
+  font-size: 1.4rem !important;
+  font-weight: 800 !important;
+  margin-top: 1.5rem !important;
+  margin-bottom: 0.75rem !important;
+  display: block !important;
+}
+
+.markdown-body h3 {
+  font-size: 1.1rem !important;
+  font-weight: 700 !important;
+  margin-top: 1rem !important;
+  margin-bottom: 0.5rem !important;
+  display: block !important;
+}
+
+.markdown-body p {
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+  line-height: 1.6 !important;
+  display: block !important;
+}
+
+.markdown-body code {
+  background-color: #f1f5f9 !important;
+  padding: 0.2rem 0.4rem !important;
+  border-radius: 0.375rem !important;
+  color: #0066FF !important;
+  font-family: monospace !important;
+}
+
+.markdown-body pre {
+  background-color: #0f172a !important;
+  padding: 1rem !important;
+  border-radius: 0.75rem !important;
+  margin: 1rem 0 !important;
+  overflow-x: auto !important;
+}
+
+.markdown-body pre code {
+  background-color: transparent !important;
+  padding: 0 !important;
+  color: #f8fafc !important;
 }
