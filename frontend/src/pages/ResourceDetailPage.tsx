@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { 
   ChevronLeft, Bot, BookOpen, 
-  Zap, Play, Download, Upload, Plus, File, Camera, Send
+  Zap, Play, Download, Upload, Plus, File, Camera, Send,
+  Trash2, Edit3, Copy, Check, Trash
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -28,6 +29,8 @@ const ResourceDetailPage: React.FC = () => {
   const [question, setQuestion] = useState('');
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [isAsking, setIsAsking] = useState(false);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -36,24 +39,27 @@ const ResourceDetailPage: React.FC = () => {
   const fetchData = async () => {
     try {
       const token = localStorage.getItem('token');
-      // 1. 获取教材内容
       const res = await axios.get(`/api/textbook/content/${id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setData(res.data.data);
 
-      // 2. 获取历史聊天记录
       const historyRes = await axios.get(`/api/ai/history/${id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (historyRes.data.data) {
-        const formattedHistory: ChatMessage[] = historyRes.data.data.map((m: any) => ({
+        setChatHistory(historyRes.data.data.map((m: any) => ({
           role: m.role === 'assistant' ? 'ai' : 'user',
           text: m.content
-        }));
-        setChatHistory(formattedHistory);
+        })));
       }
-    } catch (err) { console.error(err); } finally { setLoading(false); }
+    } catch (err) { 
+      if (axios.isAxiosError(err) && err.response?.status === 403) {
+        alert('权限不足：您无权查看此教材');
+        navigate('/dashboard');
+      }
+      console.error(err); 
+    } finally { setLoading(false); }
   };
 
   useEffect(() => { fetchData(); }, [id]);
@@ -78,6 +84,17 @@ const ResourceDetailPage: React.FC = () => {
     } catch (err) { alert('上传失败'); }
   };
 
+  const deleteResource = async (resourceId: number, title: string) => {
+    if (!window.confirm(`确定要删除资源《${title}》吗？`)) return;
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`/api/textbook/resource/${resourceId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      fetchData();
+    } catch (err) { alert('删除失败'); }
+  };
+
   const takeScreenshot = (e: React.MouseEvent) => {
     const card = (e.currentTarget as HTMLElement).closest('.video-card');
     const video = card?.querySelector('video');
@@ -95,13 +112,34 @@ const ResourceDetailPage: React.FC = () => {
     }
   };
 
+  const truncateHistory = async (index: number) => {
+    try {
+      const token = localStorage.getItem('token');
+      // 注意后端路由是 /ai/truncate/:id
+      await axios.get(`/api/ai/truncate/${id}?index=${index}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setChatHistory(prev => prev.slice(0, index));
+      return true;
+    } catch (err) {
+      alert('同步历史失败');
+      return false;
+    }
+  };
+
   const askAI = async () => {
     if (!question && !pendingImage) return;
-    setIsAsking(true);
     
+    if (editingIdx !== null) {
+      const success = await truncateHistory(editingIdx);
+      if (!success) return;
+      setEditingIdx(null);
+    }
+
+    setIsAsking(true);
     const currentQuestion = question;
     const currentImage = pendingImage;
-    const newUserMsg: ChatMessage = { role: 'user', text: currentQuestion || "分析截图", image: currentImage || undefined };
+    const newUserMsg: ChatMessage = { role: 'user', text: currentQuestion, image: currentImage || undefined };
     
     setChatHistory(prev => [...prev, newUserMsg, { role: 'ai', text: '' }]);
     setQuestion('');
@@ -112,7 +150,7 @@ const ResourceDetailPage: React.FC = () => {
       const response = await fetch('/api/ai/ask', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ textbook_id: parseInt(id!), question: currentQuestion || "总结教材内容", image_base64: currentImage })
+        body: JSON.stringify({ textbook_id: parseInt(id!), question: currentQuestion, image_base64: currentImage })
       });
 
       if (!response.ok) throw new Error('AI 服务异常');
@@ -126,24 +164,20 @@ const ResourceDetailPage: React.FC = () => {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
-          
           let updated = false;
           for (const line of lines) {
             if (line.startsWith('data:')) {
               let content = line.substring(5);
               if (content.trim() === '[DONE]') continue;
               if (content.startsWith(' ')) content = content.substring(1);
-              
               fullText += content;
               if (content.length === 0) fullText += "\n";
               updated = true;
             }
           }
-
           if (updated) {
             setChatHistory(prev => {
               const next = [...prev];
@@ -209,6 +243,11 @@ const ResourceDetailPage: React.FC = () => {
                   <div key={v.id} className="bg-white rounded-3xl overflow-hidden border border-slate-200 shadow-sm video-card group">
                     <div className="aspect-video bg-black relative">
                       <video crossOrigin="anonymous" src={`http://localhost:8080/${v.file_path}`} controls className="w-full h-full" />
+                      <div className="absolute top-4 right-4 flex gap-2">
+                        {isTeacher && (
+                          <button onClick={() => deleteResource(v.id, v.title)} className="bg-white/90 hover:bg-red-500 hover:text-white text-red-500 p-2 rounded-xl shadow-xl transition-all"><Trash size={18}/></button>
+                        )}
+                      </div>
                       <button onClick={takeScreenshot} className="absolute right-4 bottom-16 bg-white hover:bg-primary hover:text-white text-primary p-3 rounded-full shadow-2xl opacity-0 group-hover:opacity-100 transition-all flex items-center gap-2 font-bold text-xs"><Camera size={18} /> 截图提问</button>
                     </div>
                     <div className="p-6"><h3 className="text-xl font-bold text-slate-800 mb-2">{v.title}</h3><p className="text-slate-500 text-sm">{v.description || '暂无描述'}</p></div>
@@ -221,7 +260,12 @@ const ResourceDetailPage: React.FC = () => {
                 {files.map((f: any) => (
                   <div key={f.id} className="bg-white p-6 rounded-2xl border border-slate-200 flex items-center justify-between hover:border-primary group transition-colors">
                     <div className="flex items-center gap-4"><div className="p-3 bg-slate-50 rounded-xl text-slate-400 group-hover:text-primary transition-colors"><File size={24}/></div><div><h4 className="font-bold text-slate-800">{f.title}</h4><p className="text-xs text-slate-400 font-bold uppercase">{f.ext} • {(f.size / 1024 / 1024).toFixed(2)} MB</p></div></div>
-                    <a href={`http://localhost:8080/${f.file_path}`} download className="p-3 bg-slate-50 rounded-xl text-slate-400 hover:bg-primary hover:text-white transition-all"><Download size={20}/></a>
+                    <div className="flex gap-2">
+                      <a href={`http://localhost:8080/${f.file_path}`} download className="p-3 bg-slate-50 rounded-xl text-slate-400 hover:bg-primary hover:text-white transition-all"><Download size={20}/></a>
+                      {isTeacher && (
+                        <button onClick={() => deleteResource(f.id, f.title)} className="p-3 bg-slate-50 rounded-xl text-slate-400 hover:bg-red-500 hover:text-white transition-all"><Trash2 size={20}/></button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -237,19 +281,31 @@ const ResourceDetailPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/20 scroll-smooth">
+          <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-slate-50/20 scroll-smooth">
             {chatHistory.length === 0 && <div className="bg-primary/5 p-5 rounded-2xl border border-primary/10 text-sm text-slate-600 leading-relaxed font-medium text-center">👋 你好！我是你的 AI 助理。你可以针对教材提问，或者针对视频截图提问。</div>}
             {chatHistory.map((msg, idx) => (
-              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[95%] rounded-3xl px-5 py-4 shadow-sm text-sm leading-relaxed ${msg.role === 'user' ? 'bg-primary text-white rounded-tr-none whitespace-pre-wrap' : 'bg-white border border-slate-100 text-slate-800 rounded-tl-none'}`}>
+              <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} group`}>
+                <div className={`max-w-[95%] rounded-3xl px-5 py-4 shadow-sm text-sm leading-relaxed relative ${msg.role === 'user' ? 'bg-primary text-white rounded-tr-none' : 'bg-white border border-slate-100 text-slate-800 rounded-tl-none'}`}>
                   {msg.image && <img src={msg.image} className="rounded-2xl mb-3 border border-white/20 w-full aspect-video object-cover" alt="shot" />}
                   <div className="text-inherit">
                     {msg.role === 'ai' ? (
                       <div className="markdown-body text-slate-800">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text || "正在思考..."}</ReactMarkdown>
                       </div>
-                    ) : <div className="whitespace-pre-wrap text-inherit">{msg.text}</div>}
+                    ) : <div className="whitespace-pre-wrap">{msg.text}</div>}
                   </div>
+                </div>
+                <div className={`mt-1 flex items-center gap-3 px-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200`}>
+                  {msg.role === 'user' ? (
+                    <>
+                      <button onClick={() => { setEditingIdx(idx); setQuestion(msg.text); }} className="text-[10px] flex items-center gap-1 text-slate-400 hover:text-primary transition-colors font-bold uppercase"><Edit3 size={12}/> 编辑</button>
+                      <button onClick={async () => { if(window.confirm('确定删除吗？')) await truncateHistory(idx); }} className="text-[10px] flex items-center gap-1 text-slate-400 hover:text-red-500 transition-colors font-bold uppercase"><Trash2 size={12}/> 删除</button>
+                    </>
+                  ) : (
+                    <button onClick={() => { navigator.clipboard.writeText(msg.text); setCopiedIdx(idx); setTimeout(() => setCopiedIdx(null), 2000); }} className="text-[10px] flex items-center gap-1 text-slate-400 hover:text-primary transition-colors font-bold uppercase">
+                      {copiedIdx === idx ? <><Check size={12}/> 已复制</> : <><Copy size={12}/> 复制原文</>}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -257,20 +313,14 @@ const ResourceDetailPage: React.FC = () => {
           </div>
 
           <div className="p-6 border-t border-slate-100 space-y-4 shadow-sm shrink-0">
-            {pendingImage && (
-              <div className="relative w-32 aspect-video group ml-2 animate-in fade-in slide-in-from-bottom-4">
-                <img src={pendingImage} className="w-full h-full rounded-xl border-2 border-primary shadow-xl object-cover" alt="pre" />
-                <button onClick={() => setPendingImage(null)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1.5 shadow-lg"><Plus className="rotate-45" size={14}/></button>
+            {editingIdx !== null && (
+              <div className="flex items-center justify-between px-4 py-2 bg-primary/5 border border-primary/10 rounded-xl animate-in slide-in-from-bottom-2">
+                <span className="text-[10px] font-bold text-primary uppercase flex items-center gap-2"><Edit3 size={12}/> 正在编辑第 {editingIdx + 1} 条消息...</span>
+                <button onClick={() => { setEditingIdx(null); setQuestion(''); }} className="text-[10px] font-bold text-slate-400 hover:text-slate-600">取消</button>
               </div>
             )}
             <div className="relative">
-              <textarea 
-                placeholder={pendingImage ? "描述截图的问题..." : "针对课程提问..."}
-                className="w-full bg-slate-50 border border-slate-200 rounded-3xl p-5 pr-16 text-sm outline-none focus:ring-2 focus:ring-primary h-28 resize-none shadow-inner text-slate-900"
-                value={question}
-                onChange={e => setQuestion(e.target.value)}
-                onKeyDown={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askAI(); } }}
-              />
+              <textarea placeholder={pendingImage ? "描述截图的问题..." : "针对课程提问..."} className="w-full bg-slate-50 border border-slate-200 rounded-3xl p-5 pr-16 text-sm outline-none focus:ring-2 focus:ring-primary h-28 resize-none shadow-inner text-slate-900" value={question} onChange={e => setQuestion(e.target.value)} onKeyDown={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askAI(); } }}/>
               <button onClick={askAI} disabled={isAsking || (!question && !pendingImage)} className="absolute right-3 bottom-3 p-3.5 bg-primary text-white rounded-2xl shadow-xl disabled:bg-slate-200 transition-all active:scale-95 text-inherit"><Send size={22} /></button>
             </div>
           </div>
@@ -284,7 +334,7 @@ const ResourceDetailPage: React.FC = () => {
             <form onSubmit={handleResourceUpload} className="space-y-6">
               <div className="space-y-2"><label className="text-sm font-bold text-slate-700 ml-1 text-inherit">资源名称</label><input className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-primary text-slate-900" value={uploadForm.title} onChange={e => setUploadForm({...uploadForm, title: e.target.value})} required /></div>
               <div className="space-y-2"><label className="text-sm font-bold text-slate-700 ml-1 text-inherit">简要描述</label><textarea className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl outline-none h-24 resize-none text-slate-900" value={uploadForm.description} onChange={e => setUploadForm({...uploadForm, description: e.target.value})}/></div>
-              <div className="border-2 border-dashed border-slate-200 rounded-[2rem] p-10 flex flex-col items-center justify-center bg-slate-50 relative hover:border-primary transition-colors cursor-pointer text-inherit"><input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => setSelectedFile(e.target.files?.[0] || null)} required/><Plus size={32} className="text-slate-300 mb-2"/><span className="text-slate-500 text-sm">选择视频或文档</span></div>
+              <div className="border-2 border-dashed border-slate-200 rounded-[2rem] p-10 flex flex-col items-center justify-center bg-slate-50 relative hover:border-primary transition-colors cursor-pointer text-inherit"><input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => setSelectedFile(e.target.files?.[0] || null)} required/><Plus size={32} className="text-slate-300 mb-2"/><span className="text-slate-500 text-sm">选择文件</span></div>
               <div className="flex gap-4 mt-8"><button type="button" onClick={() => setShowUploadModal(false)} className="flex-1 py-4 border rounded-2xl font-bold text-slate-500 text-inherit">取消</button><button type="submit" className="flex-1 py-4 bg-primary text-white rounded-2xl font-bold hover:bg-primary-dark shadow-lg shadow-blue-100 transition-all text-inherit">确认上传</button></div>
             </form>
           </div>

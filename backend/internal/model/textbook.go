@@ -18,6 +18,11 @@ type Textbook struct {
 	FilePath    string         `gorm:"not null" json:"file_path"` // Local path to PDF file
 	UploadedBy  uint           `gorm:"not null;index" json:"uploaded_by"` // User ID of the uploader
 	Status      string         `gorm:"size:20;default:'pending'" json:"status"` // pending, processing, completed, failed
+	
+	// ACL 权限控制
+	Visibility        int    `gorm:"default:0" json:"visibility"` // 0: Public, 1: Private
+	AllowedStudentIDs string `gorm:"type:text" json:"allowed_student_ids"` // Comma-separated user IDs or JSON
+
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
