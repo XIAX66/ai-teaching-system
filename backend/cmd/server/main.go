@@ -53,12 +53,16 @@ func main() {
 			userGroup.GET("/textbook/search", textbookHandler.Search)
 			userGroup.GET("/textbook/content/:id", textbookHandler.GetContent)
 			userGroup.POST("/textbook/content/:id/resource", textbookHandler.UploadResource)
+			userGroup.POST("/textbook/content/:id/acl", textbookHandler.UpdateACL)
+			userGroup.DELETE("/textbook/content/:id", textbookHandler.Delete)
+			userGroup.DELETE("/textbook/resource/:id", textbookHandler.DeleteResource)
 
 			// AI Routes
 			userGroup.POST("/ai/ask", aiHandler.Ask)
 			userGroup.GET("/ai/history/:id", aiHandler.GetHistory)
+			userGroup.GET("/ai/truncate/:id", aiHandler.TruncateHistory)
 
-			// Legacy Video Routes (Optional to keep for now)
+			// Legacy Video Routes
 			userGroup.POST("/video/upload", videoHandler.Upload)
 			userGroup.GET("/video/list", videoHandler.List)
 			userGroup.GET("/video/detail/:id", videoHandler.GetDetail)

@@ -41,22 +41,18 @@ func (h *AIHandler) Ask(c *gin.Context) {
 		return
 	}
 
-	// 关键修复：使用正确的 context 键名 "userID"
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: User info missing"})
 		return
 	}
 	
-	// 在 JWT 中间件中 claims.UserID 通常直接是 uint 类型或通过类型断言确定
 	var userID uint
 	switch v := userIDVal.(type) {
-	case uint:
-		userID = v
-	case float64:
-		userID = uint(v)
+	case uint: userID = v
+	case float64: userID = uint(v)
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID type in context"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID type"})
 		return
 	}
 
@@ -85,7 +81,6 @@ func (h *AIHandler) GetHistory(c *gin.Context) {
 	textbookIDStr := c.Param("id")
 	tid, _ := strconv.ParseUint(textbookIDStr, 10, 32)
 
-	// 关键修复：使用正确的 context 键名 "userID"
 	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -94,10 +89,8 @@ func (h *AIHandler) GetHistory(c *gin.Context) {
 
 	var userID uint
 	switch v := userIDVal.(type) {
-	case uint:
-		userID = v
-	case float64:
-		userID = uint(v)
+	case uint: userID = v
+	case float64: userID = uint(v)
 	}
 
 	history, err := h.agentService.GetChatHistory(userID, uint(tid))
@@ -107,4 +100,31 @@ func (h *AIHandler) GetHistory(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": history})
+}
+
+// TruncateHistory handles the request to delete/edit message history
+func (h *AIHandler) TruncateHistory(c *gin.Context) {
+	textbookIDStr := c.Param("id")
+	tid, _ := strconv.ParseUint(textbookIDStr, 10, 32)
+
+	indexStr := c.Query("index")
+	index, err := strconv.Atoi(indexStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid index"})
+		return
+	}
+
+	userIDVal, _ := c.Get("userID")
+	var userID uint
+	switch v := userIDVal.(type) {
+	case uint: userID = v
+	case float64: userID = uint(v)
+	}
+
+	if err := h.agentService.TruncateChatHistory(userID, uint(tid), index); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "History truncated successfully"})
 }
