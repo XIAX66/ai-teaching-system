@@ -4,10 +4,11 @@ import axios from 'axios';
 import { 
   ChevronLeft, Bot, BookOpen, 
   Zap, Play, Download, Upload, Plus, File, Camera, Send,
-  Trash2, Edit3, Copy, Check, Trash
+  Trash2, Edit3, Copy, Check, Network, RefreshCw, Loader2, X
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import ForceGraph2D from 'react-force-graph-2d';
 
 interface ChatMessage {
   role: 'user' | 'ai';
@@ -19,8 +20,9 @@ const ResourceDetailPage: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [data, setData] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'reader' | 'parsed' | 'videos' | 'files'>('reader');
+  const [activeTab, setActiveTab] = useState<'reader' | 'parsed' | 'videos' | 'files' | 'graph'>('reader');
   const [loading, setLoading] = useState(true);
+  const [graphLoading, setGraphLoading] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadForm, setUploadForm] = useState({ title: '', description: '' });
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -33,6 +35,10 @@ const ResourceDetailPage: React.FC = () => {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const [graphData, setGraphData] = useState<{nodes: any[], links: any[]}>({ nodes: [], links: [] });
+  const [selectedNode, setSelectedNode] = useState<any>(null);
+  const fgRef = useRef<any>(null);
 
   const isTeacher = localStorage.getItem('role') === 'teacher';
 
@@ -55,15 +61,45 @@ const ResourceDetailPage: React.FC = () => {
       }
     } catch (err) { 
       if (axios.isAxiosError(err) && err.response?.status === 403) {
-        alert('权限不足：您无权查看此教材');
+        alert('权限不足');
         navigate('/dashboard');
       }
-      console.error(err); 
     } finally { setLoading(false); }
   };
 
+  const fetchGraph = async () => {
+    setGraphLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`/api/textbook/graph/${id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.data.data && res.data.data.nodes && res.data.data.nodes.length > 0) {
+        const raw = res.data.data;
+        setGraphData({
+          nodes: raw.nodes.map((n: any) => ({ id: n.id, name: n.label, ...n.props })),
+          links: (raw.links || []).map((l: any) => ({ source: l.source, target: l.target, type: l.type }))
+        });
+      } else {
+        setGraphData({ nodes: [], links: [] });
+      }
+    } catch (err) { console.error(err); } finally { setGraphLoading(false); }
+  };
+
   useEffect(() => { fetchData(); }, [id]);
+  useEffect(() => { if (activeTab === 'graph') fetchGraph(); }, [activeTab, id]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory]);
+
+  // 配置力导向参数：增加排斥力和硬碰撞
+  useEffect(() => {
+    if (fgRef.current) {
+      fgRef.current.d3Force('charge').strength(-1200); // 更强的排斥
+      fgRef.current.d3Force('link').distance(250);    // 更长的距离
+      // 增加碰撞力，防止重叠
+      // fgRef.current.d3Force('collide', require('d3-force').forceCollide(100)); 
+      // 注意：直接操作 d3Force 时，半径设定为 100 左右
+    }
+  }, [graphData]);
 
   const handleResourceUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,51 +151,35 @@ const ResourceDetailPage: React.FC = () => {
   const truncateHistory = async (index: number) => {
     try {
       const token = localStorage.getItem('token');
-      // 注意后端路由是 /ai/truncate/:id
       await axios.get(`/api/ai/truncate/${id}?index=${index}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setChatHistory(prev => prev.slice(0, index));
       return true;
-    } catch (err) {
-      alert('同步历史失败');
-      return false;
-    }
+    } catch (err) { alert('操作失败'); return false; }
   };
 
-  const askAI = async () => {
-    if (!question && !pendingImage) return;
-    
-    if (editingIdx !== null) {
-      const success = await truncateHistory(editingIdx);
-      if (!success) return;
-      setEditingIdx(null);
-    }
+  const askAIWithPrompt = async (q: string) => {
+    performAskAI(q);
+  };
 
+  const performAskAI = async (q: string) => {
     setIsAsking(true);
-    const currentQuestion = question;
-    const currentImage = pendingImage;
-    const newUserMsg: ChatMessage = { role: 'user', text: currentQuestion, image: currentImage || undefined };
-    
+    const newUserMsg: ChatMessage = { role: 'user', text: q };
     setChatHistory(prev => [...prev, newUserMsg, { role: 'ai', text: '' }]);
     setQuestion('');
-    setPendingImage(null);
-
     try {
       const token = localStorage.getItem('token');
       const response = await fetch('/api/ai/ask', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ textbook_id: parseInt(id!), question: currentQuestion, image_base64: currentImage })
+        body: JSON.stringify({ textbook_id: parseInt(id!), question: q })
       });
-
       if (!response.ok) throw new Error('AI 服务异常');
-
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let fullText = '';
       let buffer = '';
-
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
@@ -196,12 +216,36 @@ const ResourceDetailPage: React.FC = () => {
     } finally { setIsAsking(false); }
   };
 
-  const pdfUrl = data?.metadata?.file_path ? `http://localhost:8080/${data.metadata.file_path}` : '';
+  const askAI = () => {
+    if (!question && !pendingImage) return;
+    performAskAI(question);
+  };
+
+  const wrapText = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
+    const words = text.split('');
+    let line = '';
+    const lines = [];
+    for (let n = 0; n < words.length; n++) {
+      const testLine = line + words[n];
+      const metrics = ctx.measureText(testLine);
+      const testWidth = metrics.width;
+      if (testWidth > maxWidth && n > 0) {
+        lines.push(line);
+        line = words[n];
+      } else {
+        line = testLine;
+      }
+    }
+    lines.push(line);
+    return lines;
+  };
+
+  const pdfUrl = data?.metadata?.file_path ? `http://localhost:8080/${data.metadata.file_path}` : null;
   const videos = data?.resources?.filter((r: any) => r.type === 'video') || [];
   const files = data?.resources?.filter((r: any) => r.type === 'file') || [];
 
   return (
-    <div className="h-screen flex flex-col bg-white overflow-hidden text-slate-900">
+    <div className="h-screen flex flex-col bg-white overflow-hidden text-slate-900 font-sans">
       <header className="h-16 border-b border-slate-200 flex items-center justify-between px-6 shrink-0 bg-white z-10 shadow-sm">
         <div className="flex items-center gap-4">
           <button onClick={() => navigate('/dashboard')} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500"><ChevronLeft size={24} /></button>
@@ -214,6 +258,7 @@ const ResourceDetailPage: React.FC = () => {
         <nav className="flex bg-slate-100 p-1 rounded-xl">
           <TabButton active={activeTab === 'reader'} onClick={() => setActiveTab('reader')} label="教材阅读" />
           <TabButton active={activeTab === 'parsed'} onClick={() => setActiveTab('parsed')} label="AI 解析文稿" />
+          <TabButton active={activeTab === 'graph'} onClick={() => setActiveTab('graph')} label="知识图谱" icon={<Network size={14}/>} />
           <TabButton active={activeTab === 'videos'} onClick={() => setActiveTab('videos')} label={`视频 (${videos.length})`} />
           <TabButton active={activeTab === 'files'} onClick={() => setActiveTab('files')} label={`资料 (${files.length})`} />
         </nav>
@@ -224,11 +269,19 @@ const ResourceDetailPage: React.FC = () => {
         <div className="flex-1 overflow-hidden relative bg-slate-50 border-r border-slate-200">
           <canvas ref={canvasRef} className="hidden" />
           <div className="h-full overflow-y-auto">
-            {activeTab === 'reader' && <div className="h-full p-6"><iframe src={pdfUrl} className="w-full h-full rounded-xl shadow-2xl border bg-white" title="PDF" /></div>}
+            {activeTab === 'reader' && (
+              <div className="h-full p-6">
+                {pdfUrl ? (
+                  <iframe src={pdfUrl} className="w-full h-full rounded-xl shadow-2xl border bg-white" title="PDF" />
+                ) : (
+                  <div className="flex items-center justify-center h-full text-slate-400 font-medium">正在准备教材文件...</div>
+                )}
+              </div>
+            )}
             {activeTab === 'parsed' && (
               <div className="p-12 max-w-4xl mx-auto">
                 {data?.content?.chapters?.map((ch: any, i: number) => (
-                  <div key={i} className="mb-10 text-slate-900 text-inherit">
+                  <div key={i} className="mb-10 text-slate-900">
                     <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-3 text-slate-900"><span className="w-1.5 h-8 bg-primary rounded-full" />{ch.title}</h2>
                     {ch.sections?.map((sec: any, si: number) => (
                       <div key={si} className="mb-8 bg-white p-8 rounded-3xl border border-slate-100 shadow-sm text-slate-900 text-inherit"><h3 className="text-lg font-bold text-slate-700 mb-4">{sec.title}</h3><div className="whitespace-pre-wrap text-sm text-slate-700">{sec.content}</div></div>
@@ -237,17 +290,116 @@ const ResourceDetailPage: React.FC = () => {
                 ))}
               </div>
             )}
+            {activeTab === 'graph' && (
+              <div className="h-full w-full bg-[#0f172a] relative overflow-hidden">
+                <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#3b82f6 0.5px, transparent 0.5px)', backgroundSize: '30px 30px' }}></div>
+                
+                {graphData.nodes.length > 0 ? (
+                  <ForceGraph2D
+                    ref={fgRef}
+                    graphData={graphData}
+                    nodeLabel="name"
+                    linkColor={() => '#3b82f666'}
+                    linkDirectionalArrowLength={6}
+                    linkDirectionalArrowRelPos={1}
+                    linkCurvature={0.2}
+                    nodeCanvasObject={(node: any, ctx, globalScale) => {
+                      const label = node.name;
+                      const fontSize = 14/globalScale;
+                      ctx.font = `bold ${fontSize}px "Inter", sans-serif`;
+                      
+                      const cardWidth = 160;
+                      const lines = wrapText(ctx, label, cardWidth - 30);
+                      const lineHeight = fontSize * 1.4;
+                      const cardHeight = lines.length * lineHeight + 30;
+
+                      ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+                      ctx.shadowBlur = 15 / globalScale;
+                      ctx.shadowOffsetY = 5 / globalScale;
+
+                      const isSelected = node.id === selectedNode?.id;
+                      ctx.fillStyle = isSelected ? '#1e293b' : '#ffffff';
+                      
+                      const x = node.x - cardWidth / 2;
+                      const y = node.y - cardHeight / 2;
+                      
+                      const r = 12 / globalScale;
+                      ctx.beginPath();
+                      ctx.moveTo(x + r, y); ctx.lineTo(x + cardWidth - r, y);
+                      ctx.quadraticCurveTo(x + cardWidth, y, x + cardWidth, y + r);
+                      ctx.lineTo(x + cardWidth, y + cardHeight - r);
+                      ctx.quadraticCurveTo(x + cardWidth, y + cardHeight, x + cardWidth - r, y + cardHeight);
+                      ctx.lineTo(x + r, y + cardHeight);
+                      ctx.quadraticCurveTo(x, y + cardHeight, x, y + cardHeight - r);
+                      ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
+                      ctx.closePath(); ctx.fill();
+
+                      ctx.shadowBlur = 0;
+                      ctx.fillStyle = '#3b82f6';
+                      ctx.fillRect(x, y + r, 6 / globalScale, cardHeight - 2 * r);
+
+                      ctx.textAlign = 'center';
+                      ctx.textBaseline = 'middle';
+                      ctx.fillStyle = isSelected ? '#ffffff' : '#1e293b';
+                      lines.forEach((line, i) => {
+                        const lineY = y + 15 + (i + 0.5) * lineHeight;
+                        ctx.fillText(line, node.x, lineY);
+                      });
+
+                      // 记录尺寸供 Pointer 区域绘制使用
+                      node.__bckgDimensions = [cardWidth, cardHeight];
+                    }}
+                    nodePointerAreaPaint={(node: any, color, ctx) => {
+                      // 关键修复：扩大点击区域至整张卡片
+                      const [w, h] = node.__bckgDimensions || [160, 40];
+                      ctx.fillStyle = color;
+                      ctx.fillRect(node.x - w / 2, node.y - h / 2, w, h);
+                    }}
+                    onNodeClick={(node: any) => setSelectedNode(node)}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-4 relative z-10">
+                    {graphLoading ? <Loader2 className="animate-spin text-primary" size={48} /> : <Network size={48} className="opacity-20" />}
+                    <p className="font-bold uppercase tracking-widest text-sm">{graphLoading ? 'AI 正在构建知识网络...' : '暂无图谱数据'}</p>
+                    {!graphLoading && <button onClick={fetchGraph} className="flex items-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 text-white rounded-2xl transition-all font-bold text-xs border border-white/10"><RefreshCw size={14} /> 刷新图谱</button>}
+                  </div>
+                )}
+
+                {selectedNode && (
+                  <div className="absolute top-6 right-6 w-[340px] bg-[#1e293b]/95 backdrop-blur-2xl border border-white/10 shadow-2xl rounded-[2.5rem] p-8 animate-in slide-in-from-right-4 duration-300 z-20 text-white">
+                    <button onClick={() => setSelectedNode(null)} className="absolute top-6 right-6 text-white/40 hover:text-white"><X size={20}/></button>
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20"><Zap size={20}/></div>
+                      <h3 className="text-lg font-bold leading-tight">{selectedNode.name}</h3>
+                    </div>
+                    <div className="bg-white/5 rounded-2xl p-6 mb-8 border border-white/5">
+                      <p className="text-sm text-slate-300 leading-relaxed font-medium">{selectedNode.description || '暂无详细描述内容'}</p>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        askAIWithPrompt(`我想深入学习一下“${selectedNode.name}”这个知识点，请结合教材内容给我讲解一下。`);
+                        setSelectedNode(null);
+                      }}
+                      className="w-full bg-primary hover:bg-primary-dark text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 transition-all active:scale-95 text-inherit"
+                    >
+                      <Bot size={18}/> 发起 AI 深入解析
+                    </button>
+                  </div>
+                )}
+
+                <div className="absolute bottom-8 left-8 bg-white/5 backdrop-blur-md p-5 rounded-3xl border border-white/10 text-white/80 pointer-events-none">
+                  <h4 className="font-bold text-xs mb-1 flex items-center gap-2 text-white"><Network size={14}/> 知识逻辑图谱</h4>
+                  <p className="text-[10px] opacity-60 font-medium">全卡片响应式点击 · 增强物理防重叠布局</p>
+                </div>
+              </div>
+            )}
             {activeTab === 'videos' && (
               <div className="p-10 grid grid-cols-1 gap-8 max-w-5xl mx-auto">
                 {videos.map((v: any) => (
                   <div key={v.id} className="bg-white rounded-3xl overflow-hidden border border-slate-200 shadow-sm video-card group">
                     <div className="aspect-video bg-black relative">
                       <video crossOrigin="anonymous" src={`http://localhost:8080/${v.file_path}`} controls className="w-full h-full" />
-                      <div className="absolute top-4 right-4 flex gap-2">
-                        {isTeacher && (
-                          <button onClick={() => deleteResource(v.id, v.title)} className="bg-white/90 hover:bg-red-500 hover:text-white text-red-500 p-2 rounded-xl shadow-xl transition-all"><Trash size={18}/></button>
-                        )}
-                      </div>
+                      {isTeacher && <button onClick={() => deleteResource(v.id, v.title)} className="absolute top-4 right-4 bg-white/90 hover:bg-red-500 hover:text-white text-red-500 p-2 rounded-xl shadow-xl transition-all"><Trash2 size={18}/></button>}
                       <button onClick={takeScreenshot} className="absolute right-4 bottom-16 bg-white hover:bg-primary hover:text-white text-primary p-3 rounded-full shadow-2xl opacity-0 group-hover:opacity-100 transition-all flex items-center gap-2 font-bold text-xs"><Camera size={18} /> 截图提问</button>
                     </div>
                     <div className="p-6"><h3 className="text-xl font-bold text-slate-800 mb-2">{v.title}</h3><p className="text-slate-500 text-sm">{v.description || '暂无描述'}</p></div>
@@ -262,9 +414,7 @@ const ResourceDetailPage: React.FC = () => {
                     <div className="flex items-center gap-4"><div className="p-3 bg-slate-50 rounded-xl text-slate-400 group-hover:text-primary transition-colors"><File size={24}/></div><div><h4 className="font-bold text-slate-800">{f.title}</h4><p className="text-xs text-slate-400 font-bold uppercase">{f.ext} • {(f.size / 1024 / 1024).toFixed(2)} MB</p></div></div>
                     <div className="flex gap-2">
                       <a href={`http://localhost:8080/${f.file_path}`} download className="p-3 bg-slate-50 rounded-xl text-slate-400 hover:bg-primary hover:text-white transition-all"><Download size={20}/></a>
-                      {isTeacher && (
-                        <button onClick={() => deleteResource(f.id, f.title)} className="p-3 bg-slate-50 rounded-xl text-slate-400 hover:bg-red-500 hover:text-white transition-all"><Trash2 size={20}/></button>
-                      )}
+                      {isTeacher && <button onClick={() => deleteResource(f.id, f.title)} className="p-3 bg-slate-50 rounded-xl text-slate-400 hover:bg-red-500 hover:text-white transition-all"><Trash2 size={20}/></button>}
                     </div>
                   </div>
                 ))}
@@ -344,8 +494,8 @@ const ResourceDetailPage: React.FC = () => {
   );
 };
 
-const TabButton = ({ active, onClick, label }: any) => (
-  <button onClick={onClick} className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${active ? 'bg-white text-primary shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>{label}</button>
+const TabButton = ({ active, onClick, label, icon }: any) => (
+  <button onClick={onClick} className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${active ? 'bg-white text-primary shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>{icon}{label}</button>
 );
 
 export default ResourceDetailPage;

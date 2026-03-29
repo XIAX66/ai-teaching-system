@@ -21,6 +21,7 @@ import (
 type TextbookService struct {
 	repo          *repository.TextbookRepository
 	vectorService *service.VectorService
+	graphService  *GraphService
 }
 
 func NewTextbookService() *TextbookService {
@@ -28,6 +29,7 @@ func NewTextbookService() *TextbookService {
 	return &TextbookService{
 		repo:          repository.NewTextbookRepository(),
 		vectorService: vs,
+		graphService:  NewGraphService(),
 	}
 }
 
@@ -46,16 +48,15 @@ func (s *TextbookService) UploadTextbook(title, author, isbn, filePath string, u
 		UploadedBy: uploaderID,
 		Status:     "uploaded",
 		Version:    "1.0",
-		Visibility: 0, // 默认公开
+		Visibility: 0,
 	}
 	if err := s.repo.CreateTextbook(textbook); err != nil {
 		return nil, err
 	}
-	go s.ParseAndStoreTextbook(textbook.ID, filePath)
+	go s.ParseAndStoreTextbook(textbook.ID, title, filePath)
 	return textbook, nil
 }
 
-// UpdateTextbookACL 更新教材访问权限
 func (s *TextbookService) UpdateTextbookACL(textbookID uint, teacherID uint, visibility int, studentIDs []string) error {
 	var textbook model.Textbook
 	if err := global.DB.First(&textbook, textbookID).Error; err != nil {
@@ -64,10 +65,8 @@ func (s *TextbookService) UpdateTextbookACL(textbookID uint, teacherID uint, vis
 	if textbook.UploadedBy != teacherID {
 		return errors.New("permission denied: only the owner can update ACL")
 	}
-
 	textbook.Visibility = visibility
 	textbook.AllowedStudentIDs = strings.Join(studentIDs, ",")
-	
 	return global.DB.Save(&textbook).Error
 }
 
@@ -133,13 +132,14 @@ func (s *TextbookService) AddResource(textbookID uint, title, rType, filePath, d
 	return resource, nil
 }
 
-func (s *TextbookService) ParseAndStoreTextbook(textbookID uint, filePath string) {
+func (s *TextbookService) ParseAndStoreTextbook(textbookID uint, title, filePath string) {
 	log.Printf("Starting PDF parsing for Textbook ID %d", textbookID)
 	pythonPath := "./venv/bin/python3"
 	scriptPath := "./scripts/parse_pdf.py"
 	cmd := exec.Command(pythonPath, scriptPath, filePath)
 	output, err := cmd.Output()
 	if err != nil {
+		log.Printf("PDF Parse Error: %v", err)
 		s.updateStatus(textbookID, "failed_to_parse")
 		return
 	}
@@ -156,9 +156,20 @@ func (s *TextbookService) ParseAndStoreTextbook(textbookID uint, filePath string
 	collection := global.MongoDatabase.Collection("textbook_contents")
 	_, _ = collection.DeleteMany(ctx, map[string]interface{}{"textbook_id": textbookID})
 	_, _ = collection.InsertOne(ctx, textbookContent)
+	
 	if s.vectorService != nil {
 		_ = s.vectorService.IndexTextbook(textbookID, contentStr)
 	}
+
+	if s.graphService != nil {
+		go func() {
+			err := s.graphService.ExtractAndStoreKG(textbookID, title, contentStr)
+			if err != nil {
+				log.Printf("[TextbookService] KG Extraction Error: %v", err)
+			}
+		}()
+	}
+
 	s.updateStatus(textbookID, "processed")
 }
 
@@ -170,7 +181,6 @@ func (s *TextbookService) GetTextbooksByTeacher(teacherID uint) ([]model.Textboo
 	return s.repo.ListTextbooksByTeacherID(teacherID)
 }
 
-// GetAllTextbooks 适配权限过滤
 func (s *TextbookService) GetAllTextbooks(userID uint, role string) ([]model.Textbook, error) {
 	if role == "teacher" {
 		return s.repo.ListAll()
@@ -182,37 +192,32 @@ func (s *TextbookService) SearchTextbooks(query string) ([]model.Textbook, error
 	return s.repo.SearchTextbooks(query)
 }
 
-// GetTextbookContent 增加权限校验
 func (s *TextbookService) GetTextbookContent(textbookID string, userID uint, role string) (*TextbookDetail, error) {
 	var tid uint
 	fmt.Sscanf(textbookID, "%d", &tid)
-	
 	var metadata model.Textbook
 	if err := global.DB.First(&metadata, tid).Error; err != nil { return nil, err }
-
-	// 权限校验逻辑
-	if role == "student" {
-		if metadata.Visibility == 1 {
-			// 检查学生是否在白名单中
-			allowed := false
-			ids := strings.Split(metadata.AllowedStudentIDs, ",")
-			userIDStr := fmt.Sprintf("%d", userID)
-			for _, id := range ids {
-				if id == userIDStr {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				return nil, errors.New("permission denied: you are not authorized to view this textbook")
-			}
+	if role == "student" && metadata.Visibility == 1 {
+		allowed := false
+		ids := strings.Split(metadata.AllowedStudentIDs, ",")
+		uIDStr := fmt.Sprintf("%d", userID)
+		for _, id := range ids {
+			if id == uIDStr { allowed = true; break }
 		}
+		if !allowed { return nil, errors.New("permission denied") }
 	}
-
 	var resources []model.Resource
 	global.DB.Where("textbook_id = ?", tid).Find(&resources)
 	content, _ := s.fetchFromMongo(tid)
 	return &TextbookDetail{Metadata: &metadata, Resources: resources, Content: content}, nil
+}
+
+// GetKnowledgeGraph 桥接 GraphService 的方法
+func (s *TextbookService) GetKnowledgeGraph(textbookID uint) (*GraphData, error) {
+	if s.graphService == nil {
+		return nil, errors.New("graph service not initialized")
+	}
+	return s.graphService.GetGraph(textbookID)
 }
 
 func (s *TextbookService) fetchFromMongo(tid uint) (*mongo.TextbookContent, error) {
