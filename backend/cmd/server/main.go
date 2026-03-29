@@ -52,6 +52,7 @@ func main() {
 			userGroup.GET("/textbook/list", textbookHandler.List)
 			userGroup.GET("/textbook/search", textbookHandler.Search)
 			userGroup.GET("/textbook/content/:id", textbookHandler.GetContent)
+			userGroup.GET("/textbook/graph/:id", textbookHandler.GetKnowledgeGraph)
 			userGroup.POST("/textbook/content/:id/resource", textbookHandler.UploadResource)
 			userGroup.POST("/textbook/content/:id/acl", textbookHandler.UpdateACL)
 			userGroup.DELETE("/textbook/content/:id", textbookHandler.Delete)
