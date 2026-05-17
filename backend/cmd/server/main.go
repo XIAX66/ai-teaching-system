@@ -16,7 +16,7 @@ func main() {
 
 	// Initialize Router
 	r := gin.Default()
-	r.MaxMultipartMemory = 50 << 20 // 50 MiB
+	r.MaxMultipartMemory = 200 << 20 // 200 MiB
 
 	// Middleware
 	r.Use(middleware.CORS())
@@ -53,7 +53,9 @@ func main() {
 			userGroup.GET("/textbook/search", textbookHandler.Search)
 			userGroup.GET("/textbook/content/:id", textbookHandler.GetContent)
 			userGroup.GET("/textbook/graph/:id", textbookHandler.GetKnowledgeGraph)
+			userGroup.GET("/textbook/content/:id/knowledge/:knowledgePointId", textbookHandler.GetKnowledgePointDetail)
 			userGroup.POST("/textbook/content/:id/resource", textbookHandler.UploadResource)
+			userGroup.POST("/textbook/content/:id/knowledge/:knowledgePointId/resource", textbookHandler.UploadKnowledgePointResource)
 			userGroup.POST("/textbook/content/:id/acl", textbookHandler.UpdateACL)
 			userGroup.DELETE("/textbook/content/:id", textbookHandler.Delete)
 			userGroup.DELETE("/textbook/resource/:id", textbookHandler.DeleteResource)

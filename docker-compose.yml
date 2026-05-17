@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # MySQL: Metadata Storage
   mysql:
@@ -7,12 +5,12 @@ services:
     container_name: ats_mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: root_password
-      MYSQL_DATABASE: ai_teaching_db
-      MYSQL_USER: user
-      MYSQL_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change_me_root_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ai_teaching_db}
+      MYSQL_USER: ${MYSQL_USER:-ats_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-change_me_mysql_password}
     ports:
-      - "3307:3306"
+      - "${MYSQL_PORT:-127.0.0.1:3307}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
 
@@ -22,10 +20,10 @@ services:
     container_name: ats_mongo
     restart: always
     environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: root_password
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-change_me_mongo_password}
     ports:
-      - "27017:27017"
+      - "${MONGO_PORT:-127.0.0.1:27017}:27017"
     volumes:
       - mongo_data:/data/db
 
@@ -35,7 +33,7 @@ services:
     container_name: ats_qdrant
     restart: always
     ports:
-      - "6333:6333"
+      - "${QDRANT_PORT:-127.0.0.1:6333}:6333"
     volumes:
       - qdrant_data:/qdrant/storage
 
@@ -45,10 +43,10 @@ services:
     container_name: ats_neo4j
     restart: always
     ports:
-      - "7474:7474" # HTTP
-      - "7687:7687" # Bolt
+      - "${NEO4J_HTTP_PORT:-127.0.0.1:7474}:7474" # HTTP
+      - "${NEO4J_BOLT_PORT:-127.0.0.1:7687}:7687" # Bolt
     environment:
-      - NEO4J_AUTH=neo4j/neo4j_password
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-change_me_neo4j_password}
     volumes:
       - neo4j_data:/data
 
@@ -63,15 +61,16 @@ services:
       - qdrant
       - neo4j
     environment:
-      - MYSQL_DSN=user:password@tcp(mysql:3306)/ai_teaching_db?charset=utf8mb4&parseTime=True&loc=Local
-      - MONGO_URI=mongodb://root:root_password@mongo:27017
-      - DOUBAO_API_KEY=b7d8b1e7-f83a-4250-ab18-932678d3277a
+      - MYSQL_DSN=${MYSQL_USER:-ats_user}:${MYSQL_PASSWORD:-change_me_mysql_password}@tcp(mysql:3306)/${MYSQL_DATABASE:-ai_teaching_db}?charset=utf8mb4&parseTime=True&loc=Local
+      - MONGO_URI=mongodb://${MONGO_ROOT_USERNAME:-root}:${MONGO_ROOT_PASSWORD:-change_me_mongo_password}@mongo:27017
+      - DOUBAO_API_KEY=${DOUBAO_API_KEY:-}
       - QDRANT_URL=http://qdrant:6333
       - NEO4J_URI=bolt://neo4j:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=neo4j_password
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-change_me_neo4j_password}
+      - GIN_MODE=${GIN_MODE:-release}
     ports:
-      - "8080:8080"
+      - "${BACKEND_PORT:-127.0.0.1:8080}:8080"
     volumes:
       - ./backend/uploads:/app/uploads
 
@@ -83,7 +82,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "3000:80"
+      - "${FRONTEND_PORT:-3000}:80"
 
 volumes:
   mysql_data:

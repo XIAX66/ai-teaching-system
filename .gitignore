@@ -2,16 +2,26 @@
 .DS_Store
 Thumbs.db
 
+# Env
+.env
+.env.*
+!.env.example
+!.env.local.example
+
 # Backend
 backend/main
+backend/server
 backend/server.log
 backend/server_test.log
 backend/*.db
+backend/*.log
 backend/venv/
 backend/uploads/textbooks/*
 backend/uploads/resources/*
+backend/uploads/videos/*
 !backend/uploads/textbooks/.gitkeep
 !backend/uploads/resources/.gitkeep
+!backend/uploads/videos/.gitkeep
 
 # Frontend
 frontend/node_modules/
@@ -22,3 +32,7 @@ frontend/*.log
 # Docker
 .docker-data/
 *.log
+
+# Caches
+__pycache__/
+*.pyc

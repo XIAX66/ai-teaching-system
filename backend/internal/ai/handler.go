@@ -24,9 +24,10 @@ func NewAIHandler() *AIHandler {
 }
 
 type AskRequest struct {
-	TextbookID  uint   `json:"textbook_id" binding:"required"`
-	Question    string `json:"question" binding:"required"`
-	ImageBase64 string `json:"image_base64"`
+	TextbookID       uint   `json:"textbook_id" binding:"required"`
+	KnowledgePointID *uint  `json:"knowledge_point_id"`
+	Question         string `json:"question" binding:"required"`
+	ImageBase64      string `json:"image_base64"`
 }
 
 func (h *AIHandler) Ask(c *gin.Context) {
@@ -46,11 +47,13 @@ func (h *AIHandler) Ask(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: User info missing"})
 		return
 	}
-	
+
 	var userID uint
 	switch v := userIDVal.(type) {
-	case uint: userID = v
-	case float64: userID = uint(v)
+	case uint:
+		userID = v
+	case float64:
+		userID = uint(v)
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID type"})
 		return
@@ -62,7 +65,7 @@ func (h *AIHandler) Ask(c *gin.Context) {
 	c.Header("Transfer-Encoding", "chunked")
 	c.Header("X-Accel-Buffering", "no")
 
-	err := h.agentService.AskStream(userID, req.TextbookID, req.Question, req.ImageBase64, func(chunk string) {
+	err := h.agentService.AskStream(userID, req.TextbookID, req.KnowledgePointID, req.Question, req.ImageBase64, func(chunk string) {
 		fmt.Fprintf(c.Writer, "data: %s\n\n", chunk)
 		c.Writer.Flush()
 	})
@@ -89,8 +92,10 @@ func (h *AIHandler) GetHistory(c *gin.Context) {
 
 	var userID uint
 	switch v := userIDVal.(type) {
-	case uint: userID = v
-	case float64: userID = uint(v)
+	case uint:
+		userID = v
+	case float64:
+		userID = uint(v)
 	}
 
 	history, err := h.agentService.GetChatHistory(userID, uint(tid))
@@ -117,8 +122,10 @@ func (h *AIHandler) TruncateHistory(c *gin.Context) {
 	userIDVal, _ := c.Get("userID")
 	var userID uint
 	switch v := userIDVal.(type) {
-	case uint: userID = v
-	case float64: userID = uint(v)
+	case uint:
+		userID = v
+	case float64:
+		userID = uint(v)
 	}
 
 	if err := h.agentService.TruncateChatHistory(userID, uint(tid), index); err != nil {
