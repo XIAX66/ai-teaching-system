@@ -23,8 +23,26 @@
 
 启动成功后：
 - **前端页面**: [http://localhost:3000](http://localhost:3000)
-- **后端接口**: [http://localhost:8080](http://localhost:8080)
-- **MySQL 端口**: `3307` (用户名: `user`, 密码: `password`)
+- **后端接口**: `http://localhost:8080`（默认仅本机访问，前端通过 `/api` 代理）
+- **MySQL 端口**: `3307`（默认仅本机访问，账号密码见 `.env`）
+
+首次启动时，如果项目根目录没有 `.env`，脚本会从 `.env.local.example` 自动复制一份。AI 问答功能需要在 `.env` 中填写 `DOUBAO_API_KEY`。
+
+### 服务器部署
+
+在服务器上复制环境变量模板并填写真实密码和密钥：
+
+```bash
+cp .env.example .env
+```
+
+确认 `.env` 中没有 `change_me` 占位值后执行：
+
+```bash
+./scripts/deploy.sh
+```
+
+生产环境默认只公开前端端口，后端接口和上传资源由前端 Nginx 通过 `/api` 与 `/uploads` 代理。
 
 ---
 

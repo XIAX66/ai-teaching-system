@@ -28,14 +28,14 @@ func InitDB() {
 }
 
 func initMySQL() {
-	dsn := "user:password@tcp(mysql:3306)/ai_teaching_db?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := "ats_user:change_me_mysql_password@tcp(mysql:3306)/ai_teaching_db?charset=utf8mb4&parseTime=True&loc=Local"
 	if envDSN := os.Getenv("MYSQL_DSN"); envDSN != "" {
 		dsn = envDSN
 	}
 
 	var err error
-	log.Printf("Connecting to MySQL using DSN: %s", dsn)
-	
+	log.Println("Connecting to MySQL...")
+
 	for i := 0; i < 10; i++ {
 		DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 		if err == nil {
@@ -51,12 +51,12 @@ func initMySQL() {
 
 	log.Println("Connected to MySQL successfully.")
 
-	_ = DB.AutoMigrate(&model.User{}, &model.Textbook{}, &model.Video{}, &model.Resource{})
+	_ = DB.AutoMigrate(&model.User{}, &model.Textbook{}, &model.Video{}, &model.KnowledgePoint{}, &model.Resource{})
 	fmt.Println("Database migration completed.")
 }
 
 func initMongoDB() {
-	uri := "mongodb://root:root_password@mongo:27017"
+	uri := "mongodb://root:change_me_mongo_password@mongo:27017"
 	if envURI := os.Getenv("MONGO_URI"); envURI != "" {
 		uri = envURI
 	}
@@ -65,8 +65,8 @@ func initMongoDB() {
 	defer cancel()
 
 	var err error
-	log.Printf("Connecting to MongoDB using URI: %s", uri)
-	
+	log.Println("Connecting to MongoDB...")
+
 	MongoClient, err = mongo.Connect(ctx, options.Client().ApplyURI(uri))
 	if err != nil {
 		log.Fatal("Failed to connect to MongoDB: ", err)

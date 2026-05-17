@@ -1,0 +1,14 @@
+.DS_Store
+*.log
+*.db
+main
+server
+venv/
+uploads/
+__pycache__/
+*.pyc
+*_res.json
+*response.json
+test*.pdf
+test*.mp4
+dummy_test.pdf

@@ -5,6 +5,7 @@ import RegisterPage from './pages/RegisterPage';
 import TeacherDashboard from './pages/TeacherDashboard';
 import StudentDashboard from './pages/StudentDashboard';
 import ResourceDetailPage from './pages/ResourceDetailPage';
+import KnowledgePointDetailPage from './pages/KnowledgePointDetailPage';
 import './index.css';
 
 const App: React.FC = () => {
@@ -30,6 +31,11 @@ const App: React.FC = () => {
           } 
         />
         
+        <Route 
+          path="/resource/:type/:id/knowledge/:knowledgePointId" 
+          element={isAuthenticated ? <KnowledgePointDetailPage /> : <Navigate to="/login" />} 
+        />
+
         <Route 
           path="/resource/:type/:id" 
           element={isAuthenticated ? <ResourceDetailPage /> : <Navigate to="/login" />} 

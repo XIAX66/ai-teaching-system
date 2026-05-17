@@ -20,9 +20,6 @@ type DoubaoProvider struct {
 
 func NewDoubaoProvider() *DoubaoProvider {
 	apiKey := os.Getenv("DOUBAO_API_KEY")
-	if apiKey == "" {
-		apiKey = "b7d8b1e7-f83a-4250-ab18-932678d3277a"
-	}
 
 	return &DoubaoProvider{
 		APIKey:  apiKey,
@@ -33,6 +30,10 @@ func NewDoubaoProvider() *DoubaoProvider {
 }
 
 func (p *DoubaoProvider) ChatStream(history []DoubaoMessage, onChunk func(string)) error {
+	if p.APIKey == "" {
+		return fmt.Errorf("DOUBAO_API_KEY is not configured")
+	}
+
 	reqBody := struct {
 		Model  string          `json:"model"`
 		Input  []DoubaoMessage `json:"input"`
@@ -42,17 +43,21 @@ func (p *DoubaoProvider) ChatStream(history []DoubaoMessage, onChunk func(string
 		Input:  history,
 		Stream: true,
 	}
-	
+
 	jsonData, _ := json.Marshal(reqBody)
 	req, err := http.NewRequest("POST", p.BaseURL, bytes.NewBuffer(jsonData))
-	if err != nil { return err }
-	
+	if err != nil {
+		return err
+	}
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.APIKey)
 	req.Header.Set("Accept", "text/event-stream")
 
 	resp, err := p.Client.Do(req)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -64,15 +69,21 @@ func (p *DoubaoProvider) ChatStream(history []DoubaoMessage, onChunk func(string
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			if err == io.EOF { break }
+			if err == io.EOF {
+				break
+			}
 			return err
 		}
 
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "data:") { continue }
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
 		data := strings.TrimPrefix(line, "data:")
 		trimmed := strings.TrimSpace(data)
-		if trimmed == "[DONE]" || trimmed == "DONE" { break }
+		if trimmed == "[DONE]" || trimmed == "DONE" {
+			break
+		}
 
 		var chunk struct {
 			Type  string `json:"type"`
@@ -97,20 +108,24 @@ func (p *DoubaoProvider) Chat(prompt string, imageBase64 string) (string, error)
 		Input  []DoubaoMessage `json:"input"`
 		Stream bool            `json:"stream"`
 	}{
-		Model: p.ModelID,
-		Input: []DoubaoMessage{{Role: "user", Content: contents}},
+		Model:  p.ModelID,
+		Input:  []DoubaoMessage{{Role: "user", Content: contents}},
 		Stream: false,
 	}
 
 	jsonData, _ := json.Marshal(reqBody)
 	req, err := http.NewRequest("POST", p.BaseURL, bytes.NewBuffer(jsonData))
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.APIKey)
 
 	resp, err := p.Client.Do(req)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
@@ -130,7 +145,9 @@ func findLongestTextWithJSON(data interface{}) string {
 	var best string
 	var search func(interface{}, string)
 	search = func(n interface{}, parentKey string) {
-		if parentKey == "summary" || parentKey == "reasoning" { return }
+		if parentKey == "summary" || parentKey == "reasoning" {
+			return
+		}
 		switch v := n.(type) {
 		case map[string]interface{}:
 			for k, val := range v {
@@ -142,7 +159,9 @@ func findLongestTextWithJSON(data interface{}) string {
 				search(val, k)
 			}
 		case []interface{}:
-			for _, val := range v { search(val, "") }
+			for _, val := range v {
+				search(val, "")
+			}
 		}
 	}
 	search(data, "")
@@ -165,15 +184,19 @@ func (p *DoubaoProvider) GetEmbedding(text string, imageBase64 string) ([]float3
 	jsonData, _ := json.Marshal(reqBody)
 	// 关键改动：接口地址变更
 	embeddingURL := "https://ark.cn-beijing.volces.com/api/v3/embeddings"
-	
+
 	req, err := http.NewRequest("POST", embeddingURL, bytes.NewBuffer(jsonData))
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.APIKey)
 
 	resp, err := p.Client.Do(req)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
@@ -186,7 +209,7 @@ func (p *DoubaoProvider) GetEmbedding(text string, imageBase64 string) ([]float3
 			Embedding []float32 `json:"embedding"`
 		} `json:"data"`
 	}
-	
+
 	if err := json.Unmarshal(body, &res); err != nil {
 		return nil, fmt.Errorf("failed to parse embedding response: %v", err)
 	}
@@ -200,7 +223,7 @@ func (p *DoubaoProvider) GetEmbedding(text string, imageBase64 string) ([]float3
 
 type DoubaoMessage struct {
 	Role    string      `json:"role"`
-	Content interface{} `json:"content"` 
+	Content interface{} `json:"content"`
 }
 
 type DoubaoEmbeddingInput struct {
@@ -208,4 +231,6 @@ type DoubaoEmbeddingInput struct {
 	Text     string          `json:"text,omitempty"`
 	ImageURL *DoubaoImageURL `json:"image_url,omitempty"`
 }
-type DoubaoImageURL struct { URL string `json:"url"` }
+type DoubaoImageURL struct {
+	URL string `json:"url"`
+}
