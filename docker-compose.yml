@@ -64,6 +64,8 @@ services:
       - MYSQL_DSN=${MYSQL_USER:-ats_user}:${MYSQL_PASSWORD:-change_me_mysql_password}@tcp(mysql:3306)/${MYSQL_DATABASE:-ai_teaching_db}?charset=utf8mb4&parseTime=True&loc=Local
       - MONGO_URI=mongodb://${MONGO_ROOT_USERNAME:-root}:${MONGO_ROOT_PASSWORD:-change_me_mongo_password}@mongo:27017
       - DOUBAO_API_KEY=${DOUBAO_API_KEY:-}
+      - DOUBAO_MODEL_ID=${DOUBAO_MODEL_ID:-ep-20260314143559-m78rx}
+      - DOUBAO_EMBEDDING_MODEL=${DOUBAO_EMBEDDING_MODEL:-doubao-embedding-text-240715}
       - QDRANT_URL=http://qdrant:6333
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=${NEO4J_USER:-neo4j}
