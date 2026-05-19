@@ -5,7 +5,7 @@
 ## 1. 本地演示与服务器部署的区别
 
 - 本地演示使用 `.env.local.example`，保留开发机已有数据卷的账号密码，适合在自己电脑上演示。
-- 服务器部署使用 `.env.example`，必须替换所有 `change_me` 占位值，并填写 `DOUBAO_API_KEY`。
+- 服务器部署使用 `.env.example`，必须替换所有 `change_me` 占位值，并填写 `DOUBAO_API_KEY`。如果老师火山引擎账号里的方舟端点不同，还需要替换 `DOUBAO_MODEL_ID`。
 - 不要把本机 `.env` 上传到服务器，也不要把服务器 `.env` 提交到 Git。
 
 ## 2. 服务器前置条件
@@ -45,7 +45,30 @@ git checkout feat/knowledge-point-detail-acl-import
 
 也可以把项目目录打包上传到服务器，但不要上传本地 `.env`、`frontend/node_modules`、`frontend/dist`、`backend/venv` 等缓存目录。
 
-## 4. 配置生产环境变量
+## 4. 火山引擎方舟开通检查
+
+本系统的 AI 功能调用火山引擎方舟 Ark。注意：只有 `DOUBAO_API_KEY` 不一定够用，API Key 所属账号还必须开通并有权限调用项目使用的模型和端点。
+
+部署前请在火山引擎控制台确认：
+
+- 已开通火山方舟大模型服务，并创建可用的 API Key。
+- 对话端点已发布，并且 `.env` 中的 `DOUBAO_MODEL_ID` 是该账号下可调用的端点或模型 ID。当前项目默认值是：
+
+```env
+DOUBAO_MODEL_ID=ep-20260314143559-m78rx
+```
+
+- 文本向量模型已开通，否则教材向量化、RAG 检索和教材问答会失败。当前项目默认使用：
+
+```env
+DOUBAO_EMBEDDING_MODEL=doubao-embedding-text-240715
+```
+
+- 如果需要演示图片/视觉问答，确认 `DOUBAO_MODEL_ID` 对应端点支持图片输入，也就是后端发送的 `input_image` 内容。只支持纯文本的端点可以正常文本问答，但图片输入会报错。
+
+如果老师账号下的端点不是默认的 `ep-20260314143559-m78rx`，请在 `.env` 中改成老师账号里实际已发布、已授权的端点 ID。端点 ID 通常以 `ep-` 开头。
+
+## 5. 配置生产环境变量
 
 在项目根目录执行：
 
@@ -67,7 +90,11 @@ MYSQL_PASSWORD=替换为强密码
 MONGO_ROOT_PASSWORD=替换为强密码
 NEO4J_PASSWORD=替换为强密码
 DOUBAO_API_KEY=替换为真实豆包APIKey
+DOUBAO_MODEL_ID=替换为老师账号下可调用的方舟端点ID
+DOUBAO_EMBEDDING_MODEL=doubao-embedding-text-240715
 ```
+
+`DOUBAO_MODEL_ID` 和 `DOUBAO_EMBEDDING_MODEL` 可以先保留 `.env.example` 中的默认值，但必须确认 API Key 所属账号已经开通并有权限调用这些模型。否则后端容器可以启动，AI 问答或教材向量化仍会失败。
 
 确认 `.env` 中不能再出现 `change_me`，也不要使用本地演示密码：
 
@@ -89,7 +116,7 @@ neo4j_password
 FRONTEND_PORT=80
 ```
 
-## 5. 一键部署
+## 6. 一键部署
 
 确保脚本可执行：
 
@@ -110,6 +137,7 @@ chmod +x scripts/deploy.sh
 - `.env` 是否存在。
 - `.env` 是否仍包含 `change_me`。
 - `.env` 是否误用了本地演示密码。
+- `DOUBAO_API_KEY` 是否为空。如果为空，页面和数据库功能可以启动，但 AI 问答、教材向量化和 RAG 检索会失败。
 - Docker Compose 配置是否能正确解析。
 
 部署完成后访问：
@@ -124,7 +152,7 @@ http://服务器IP:3000
 http://服务器IP
 ```
 
-## 6. 验证服务状态
+## 7. 验证服务状态
 
 查看容器：
 
@@ -158,7 +186,7 @@ Connected to Neo4j successfully.
 Server starting on :8080
 ```
 
-## 7. 防火墙与端口
+## 8. 防火墙与端口
 
 如果浏览器无法访问页面，检查云服务器安全组或防火墙是否开放前端端口。
 
@@ -177,7 +205,7 @@ sudo ufw allow 80/tcp
 
 不建议把数据库端口直接开放到公网。
 
-## 8. 更新部署
+## 9. 更新部署
 
 代码更新后，在服务器项目目录执行：
 
@@ -198,9 +226,9 @@ docker compose restart
 docker compose logs -f
 ```
 
-## 9. 常见问题
+## 10. 常见问题
 
-### 9.1 登录接口返回 502 Bad Gateway
+### 10.1 登录接口返回 502 Bad Gateway
 
 通常是前端 Nginx 无法连接后端。先检查后端是否启动：
 
@@ -221,7 +249,7 @@ docker compose logs --tail=120 backend
 ./scripts/deploy.sh
 ```
 
-### 9.2 AI 问答报 DOUBAO_API_KEY is not configured
+### 10.2 AI 问答报 DOUBAO_API_KEY is not configured
 
 说明后端容器没有读取到豆包 API Key。检查 `.env`：
 
@@ -235,7 +263,40 @@ grep DOUBAO_API_KEY .env
 docker compose up -d --force-recreate backend
 ```
 
-### 9.3 端口访问不通
+这个错误只表示后端没有读到 API Key。如果 API Key 已填写但模型未开通，通常会看到 `ark api error` 或 `embedding api error`，需要按下面两节继续排查。
+
+### 10.3 AI 问答报 ark api error 403/404/ModelNotFound/EndpointNotFound
+
+这通常不是 Docker 或 Nginx 的问题，而是火山方舟账号、端点或模型权限问题。重点检查：
+
+- `.env` 中的 `DOUBAO_MODEL_ID` 是否是老师账号下已发布、可调用的端点。
+- `DOUBAO_API_KEY` 是否属于同一个火山引擎账号或同一个有权限的项目。
+- 方舟端点是否已发布，是否被停用，是否支持当前请求格式。
+- 如果是图片/视觉问答失败，确认该端点支持图片输入 `input_image`。
+
+查看后端完整错误：
+
+```bash
+docker compose logs --tail=200 backend
+```
+
+修改 `.env` 后重启后端：
+
+```bash
+docker compose up -d --force-recreate backend
+```
+
+### 10.4 教材解析或问答报 embedding api error
+
+这通常说明文本向量模型没有开通，或 API Key 没有调用权限。当前项目默认使用：
+
+```env
+DOUBAO_EMBEDDING_MODEL=doubao-embedding-text-240715
+```
+
+请在火山方舟控制台确认该模型可调用。如果老师账号使用的是其他文本向量模型，把 `.env` 中的 `DOUBAO_EMBEDDING_MODEL` 改成实际可用的模型名，然后重启后端。
+
+### 10.5 端口访问不通
 
 检查端口映射：
 
@@ -245,7 +306,7 @@ docker compose ps
 
 检查服务器防火墙或云安全组是否开放 `FRONTEND_PORT`。
 
-### 9.4 Docker 权限不足
+### 10.6 Docker 权限不足
 
 如果执行脚本时提示无法访问 Docker：
 
@@ -255,7 +316,7 @@ sudo docker info
 
 如果 `sudo` 可用，说明是用户权限问题。可以让管理员把当前用户加入 docker 组，或用 `sudo ./scripts/deploy.sh`。
 
-### 9.5 旧数据卷密码不一致
+### 10.7 旧数据卷密码不一致
 
 MySQL、MongoDB、Neo4j 首次初始化后，账号密码会写入 Docker volume。后续修改 `.env` 不会自动修改已有数据卷里的密码。
 
@@ -268,11 +329,25 @@ docker compose down -v
 
 注意：`down -v` 会删除数据库数据，正式环境不要随意执行。
 
-### 9.6 镜像构建很慢
+### 10.8 镜像构建很慢
 
 首次部署需要下载 Go、Node、Nginx、MySQL、MongoDB、Qdrant、Neo4j 等镜像，并安装前后端依赖，耗时较长是正常现象。后续部署会复用缓存。
 
-## 10. 演示前检查清单
+## 11. SSH 远程部署注意事项
+
+可以先在本机终端连接老师服务器：
+
+```bash
+ssh 用户名@服务器IP
+```
+
+连接成功后，再在这个 SSH 会话中执行本文档里的命令。注意：
+
+- 服务器密码、短信验证码、`DOUBAO_API_KEY` 等敏感信息不要粘贴到聊天窗口里，建议在终端或服务器编辑器中手动输入。
+- 安装 Docker、开放防火墙端口、删除 Docker volume、重启服务器等操作会影响服务器环境，执行前先确认影响范围。
+- 如果当前用户没有 Docker 权限，需要老师提供 sudo 权限，或提前把当前用户加入 docker 组。
+
+## 12. 演示前检查清单
 
 部署完成后建议按以下顺序检查：
 

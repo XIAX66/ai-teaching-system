@@ -22,6 +22,7 @@ if [ ! -f .env ]; then
     echo "❌ .env not found."
     echo "   Run: cp .env.example .env"
     echo "   Then edit .env and replace passwords plus DOUBAO_API_KEY."
+    echo "   Also confirm the Volcengine Ark chat endpoint and embedding model are enabled."
     exit 1
 fi
 
@@ -37,6 +38,14 @@ fi
 
 if ! grep -q "^DOUBAO_API_KEY=." .env; then
     echo "⚠️  DOUBAO_API_KEY is empty. Core pages can start, but AI features will fail."
+fi
+
+if ! grep -q "^DOUBAO_MODEL_ID=." .env; then
+    echo "⚠️  DOUBAO_MODEL_ID is empty. The backend will use its built-in default endpoint."
+fi
+
+if ! grep -q "^DOUBAO_EMBEDDING_MODEL=." .env; then
+    echo "⚠️  DOUBAO_EMBEDDING_MODEL is empty. The backend will use its built-in default embedding model."
 fi
 
 echo "🔎 Validating Docker Compose configuration..."

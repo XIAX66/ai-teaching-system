@@ -12,21 +12,29 @@ import (
 )
 
 type DoubaoProvider struct {
-	APIKey  string
-	ModelID string
-	BaseURL string
-	Client  *http.Client
+	APIKey         string
+	ModelID        string
+	EmbeddingModel string
+	BaseURL        string
+	Client         *http.Client
 }
 
 func NewDoubaoProvider() *DoubaoProvider {
-	apiKey := os.Getenv("DOUBAO_API_KEY")
-
 	return &DoubaoProvider{
-		APIKey:  apiKey,
-		ModelID: "ep-20260314143559-m78rx",
-		BaseURL: "https://ark.cn-beijing.volces.com/api/v3/responses",
-		Client:  &http.Client{},
+		APIKey:         os.Getenv("DOUBAO_API_KEY"),
+		ModelID:        envOrDefault("DOUBAO_MODEL_ID", "ep-20260314143559-m78rx"),
+		EmbeddingModel: envOrDefault("DOUBAO_EMBEDDING_MODEL", "doubao-embedding-text-240715"),
+		BaseURL:        "https://ark.cn-beijing.volces.com/api/v3/responses",
+		Client:         &http.Client{},
 	}
+}
+
+func envOrDefault(key string, fallback string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func (p *DoubaoProvider) ChatStream(history []DoubaoMessage, onChunk func(string)) error {
@@ -97,6 +105,10 @@ func (p *DoubaoProvider) ChatStream(history []DoubaoMessage, onChunk func(string
 }
 
 func (p *DoubaoProvider) Chat(prompt string, imageBase64 string) (string, error) {
+	if p.APIKey == "" {
+		return "", fmt.Errorf("DOUBAO_API_KEY is not configured")
+	}
+
 	var contents []map[string]interface{}
 	if imageBase64 != "" {
 		contents = append(contents, map[string]interface{}{"type": "input_image", "image_url": imageBase64})
@@ -170,13 +182,17 @@ func findLongestTextWithJSON(data interface{}) string {
 
 // GetEmbedding 升级为最新的文本向量化模型接口
 func (p *DoubaoProvider) GetEmbedding(text string, imageBase64 string) ([]float32, error) {
+	if p.APIKey == "" {
+		return nil, fmt.Errorf("DOUBAO_API_KEY is not configured")
+	}
+
 	// 关键改动：豆包纯文本向量化请求格式
 	reqBody := struct {
 		Model          string   `json:"model"`
 		Input          []string `json:"input"`
 		EncodingFormat string   `json:"encoding_format"`
 	}{
-		Model:          "doubao-embedding-text-240715",
+		Model:          p.EmbeddingModel,
 		Input:          []string{text},
 		EncodingFormat: "float",
 	}
